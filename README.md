@@ -27,9 +27,16 @@ Kotlin Multiplatform library that talks to Ledger hardware wallets over APDU, fo
   (`r || s || v`, `v` the recovery id)
 - `StellarAppClient` — the Stellar app (`CLA E0`): public key, signing of a transaction by its signature base, which
   the app parses and shows (no hash signing)
+- `TonAppClient` — the TON app (`CLA E0`): public key, signing of a v4R2 wallet transfer from its fields, with the
+  body as a cell reference (hash and depth) plus a comment or jetton transfer hint the app shows in clear; a body
+  without a hint signs blind. The answer carries the signed transfer cell hash, which the caller compares with the
+  hash of the cell it sends
+- `ThorchainAppClient` — the THORChain app (`CLA 55`): compressed public key and `thor1…` address, signing of a legacy
+  amino JSON sign doc the caller builds (`thorchain/MsgSend`, `thorchain/MsgDeposit`); the app's DER signature comes
+  back as the 64-byte low-s `r || s` Cosmos SDK expects
 
 Each client maps its app's refusal for a disabled setting (blind signing; Tron's transactions data or custom
-contracts) to `LedgerException.BlindSigningRequired`. Ed25519 apps (Solana, Stellar) take hardened paths only.
+contracts) to `LedgerException.BlindSigningRequired`. Ed25519 apps (Solana, Stellar, TON) take hardened paths only.
 
 Targets: **Android** (minSdk 27, JVM 17 bytecode) and **desktop JVM** (JDK 21).
 
@@ -59,9 +66,9 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 The speculos tests (`*SpeculosTest`, `SpeculosIntegrationTest`) run only when `SPECULOS_APDU_PORT` points at a
 running emulator started with the default seed; `SPECULOS_API_URL` (default `http://127.0.0.1:5000`) is its REST API,
 used to approve signing screens. Each test class skips unless its own app (`Bitcoin`, `Bitcoin Test`, `Litecoin`, `Dogecoin`, `Bitcoin Cash`, `Dash`,
-`Ethereum`, `Solana`, `Tron`, `Stellar`)
-is the one running; the Ethereum, Solana and Tron tests switch the app's blind signing (Tron: transactions data) setting
-through its menu as they need it.
+`Ethereum`, `Solana`, `Tron`, `Stellar`, `TON`, `THORChain`)
+is the one running; the Ethereum, Solana, Tron and TON tests switch the app's blind signing (Tron: transactions data)
+setting through its menu as they need it.
 CI builds the Nano S Plus app ELFs with `scripts/build-speculos-apps.sh` and runs them one app at a time;
 [apps/README.md](apps/README.md) lists the pinned apps, why Tron is not among them, and how to run the tests locally.
 

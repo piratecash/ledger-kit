@@ -48,7 +48,7 @@ object Speculos {
                 val screen = currentScreen()
                 when {
                     APPROVE_SCREENS.any { it in screen } && "Reject" !in screen -> press("both")
-                    READY_SCREEN in screen -> Unit
+                    isHome(screen) -> Unit
                     else -> press("right")
                 }
             }
@@ -72,14 +72,32 @@ object Speculos {
         press("right")
         press("both")
         press("both")
-        pressUntil("Back", "right")
+        pressUntil("right") { "Back" in it }
         press("both")
-        pressUntil(READY_SCREEN, "left")
+        pressUntilHome()
+    }
+
+    /**
+     * Picks entry [index] of the first setting's choice list (TON: "Allow blind sign", No / Yes), which opens on the
+     * current value and returns to the settings menu on a pick.
+     */
+    fun chooseInFirstSetting(index: Int) {
+        dismissToHome()
+        press("right")
+        press("both")
+        press("both")
+        repeat(CHOICES) { press("left") }
+        repeat(index) { press("right") }
+        press("both")
+        // The settings menu shows every entry at once, so "Back" is reached by position.
+        repeat(SETTINGS_ENTRIES - 1) { press("right") }
+        press("both")
+        pressUntilHome()
     }
 
     private suspend fun awaitHome() {
         repeat(HOME_POLLS) {
-            if (READY_SCREEN in currentScreen()) return
+            if (isHome(currentScreen())) return
             delay(STEP)
         }
         error("The app did not return to its home screen")
@@ -87,17 +105,22 @@ object Speculos {
 
     /** Leaves an error or info screen and walks back to the app's home screen. */
     fun dismissToHome() {
-        if (READY_SCREEN !in currentScreen()) press("both")
-        pressUntil(READY_SCREEN, "left")
+        if (!isHome(currentScreen())) press("both")
+        pressUntilHome()
     }
 
-    private fun pressUntil(screen: String, button: String) {
+    private fun pressUntilHome() = pressUntil("left", ::isHome)
+
+    private fun pressUntil(button: String, reached: (String) -> Boolean) {
         repeat(MAX_PRESSES) {
-            if (screen in currentScreen()) return
+            if (reached(currentScreen())) return
             press(button)
         }
-        error("No '$screen' screen")
+        error("The expected screen did not come up")
     }
+
+    // Zondax apps (THORChain) show their name over a "Ready" line instead of "<app> is ready".
+    private fun isHome(screen: String): Boolean = READY_SCREEN in screen || ZONDAX_READY_TEXT in screen
 
     fun currentScreen(): String {
         val request = HttpRequest.newBuilder(URI("$api/events?currentscreenonly=true")).GET().build()
@@ -114,10 +137,14 @@ object Speculos {
 
     private val STEP = 300.milliseconds
     private const val READY_SCREEN = "is ready"
+    private const val ZONDAX_READY_TEXT = "\"text\": \"Ready\""
     private const val MAX_PRESSES = 10
     private const val HOME_POLLS = 30
+    private const val CHOICES = 2
+    private const val SETTINGS_ENTRIES = 3
 
-    // Tron asks to "Continue" past its extra data warning.
-    private val APPROVE_SCREENS =
-        listOf("Approve", "Accept", "accept risk", "Sign transaction", "Sign Transaction", "Sign message", "Continue")
+    // Tron asks to "Continue" past its extra data warning; Zondax apps (THORChain) write "APPROVE".
+    private val APPROVE_SCREENS = listOf(
+        "Approve", "APPROVE", "Accept", "accept risk", "Sign transaction", "Sign Transaction", "Sign message", "Continue",
+    )
 }

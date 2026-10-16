@@ -16,6 +16,8 @@ class RecordingTransport(private val respond: (ByteArray) -> ByteArray) : Ledger
 
 fun ByteArray.ins(): Int = this[1].toInt() and 0xFF
 
+fun ByteArray.p1(): Int = this[2].toInt() and 0xFF
+
 fun ByteArray.p2(): Int = this[3].toInt() and 0xFF
 
 fun ByteArray.apduData(): ByteArray = copyOfRange(5, size)

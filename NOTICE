@@ -50,8 +50,32 @@ https://github.com/LedgerHQ/ledger-live
   - Pki.kt: certificate framing follows loadPKI.ts, its status words PKIError.ts
   - recorded APDU exchanges from the hw-app-solana, hw-app-trx and hw-app-str tests used as test vectors
 
-The following project is MIT-licensed; only its documentation was followed, no code was taken.
+LedgerHQ/app-ton — Copyright 2023 Whales Corp
+https://github.com/LedgerHQ/app-ton
+  - ton/TonAppClient.kt and ton/TonTransfer.kt follow doc/COMMANDS.md, doc/TRANSACTION.md and the hint
+    parsing of src/transaction
+  - test requests and cells from tests/application_client (ton_transaction.py, ton_utils.py)
+
+LedgerHQ/app-thorchain — Copyright 2018-2020 Zondax GmbH
+https://github.com/LedgerHQ/app-thorchain
+  - thorchain/ThorchainAppClient.kt follows docs/APDUSPEC.md and the status words of app/src/apdu_handler.c
+
+thorchain/ledger-thorchain-js — Copyright 2019 ZondaX GmbH
+https://github.com/thorchain/ledger-thorchain-js
+  - thorchain/ThorchainAppClient.kt: path encoding and chunking follow src/helper.ts and src/app.ts
+  - the address and DER signature vectors of tests/unit/basic.spec.ts
+
+The following projects are MIT-licensed; their documentation or code was followed, no code was taken.
 
 LedgerHQ/app-tron — Copyright (c) 2018 Fernando Sobreira
 https://github.com/LedgerHQ/app-tron
   - tron/TronAppClient.kt follows docs/APDU.md
+
+ton-community/ton-ledger-ts — Copyright (c) Steve Korshakov
+https://github.com/ton-community/ton-ledger-ts
+  - ton/TonTransfer.kt: field encoding follows convertPayload in source/TonTransport.ts and
+    source/utils/ledgerWriter.ts
+
+THORChain thornode — Copyright (c) the thornode contributors
+https://gitlab.com/thorchain/thornode
+  - the speculos test sign docs follow the amino JSON of app/params/amino_test.go
