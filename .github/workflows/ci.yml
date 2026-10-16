@@ -59,37 +59,43 @@ jobs:
       - run: ./gradlew -PVERSION_NAME=0.0.0-SNAPSHOT publishToMavenLocal --console=plain
       - run: ./gradlew -p consumer-smoke compileKotlinDesktop compileDebugKotlinAndroid --console=plain
 
-  # Runs the APDU integration tests against the speculos emulator once a Nano S Plus app ELF
-  # is committed under apps/; until then the job passes without doing anything.
+  # Runs the speculos tests against every Nano S Plus app ELF committed under apps/, one app at a
+  # time; each test class skips unless its own app is running. Without ELFs the job does nothing.
   speculos:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - id: elf
-        run: echo "path=$(ls apps/*.elf 2>/dev/null | head -1)" >> "$GITHUB_OUTPUT"
-      - if: steps.elf.outputs.path != ''
+        run: echo "count=$(ls apps/*.elf 2>/dev/null | wc -l)" >> "$GITHUB_OUTPUT"
+      - if: steps.elf.outputs.count != '0'
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - if: steps.elf.outputs.path != ''
+      - if: steps.elf.outputs.count != '0'
         uses: gradle/actions/setup-gradle@v4
-      - name: Start speculos
-        if: steps.elf.outputs.path != ''
-        run: |
-          docker run -d --name speculos -p 9999:9999 -v "$PWD/apps:/speculos/apps" \
-            ghcr.io/ledgerhq/speculos --model nanosp --display headless --apdu-port 9999 \
-            "${{ steps.elf.outputs.path }}"
-          for attempt in $(seq 1 30); do
-            nc -z 127.0.0.1 9999 && exit 0
-            sleep 1
-          done
-          docker logs speculos
-          exit 1
-      - if: steps.elf.outputs.path != ''
+      - name: Run the speculos tests for each app
+        if: steps.elf.outputs.count != '0'
         env:
           SPECULOS_APDU_PORT: "9999"
-        run: ./gradlew :ledgerkit:desktopTest --tests '*SpeculosIntegrationTest' --console=plain
+          SPECULOS_API_URL: http://127.0.0.1:5000
+        run: |
+          for elf in apps/*.elf; do
+            echo "::group::$elf"
+            # The default speculos seed is the test mnemonic the expected values are derived from.
+            docker run -d --name speculos -p 9999:9999 -p 5000:5000 -v "$PWD/apps:/speculos/apps" \
+              ghcr.io/ledgerhq/speculos --model nanosp --display headless --apdu-port 9999 --api-port 5000 "$elf"
+            ready=0
+            for attempt in $(seq 1 30); do
+              nc -z 127.0.0.1 9999 && { ready=1; break; }
+              sleep 1
+            done
+            [ "$ready" -eq 1 ] || { docker logs speculos; exit 1; }
+            # --rerun: the test task is otherwise up to date after the first app.
+            ./gradlew :ledgerkit:desktopTest --tests '*Speculos*' --rerun --console=plain
+            docker rm -f speculos
+            echo "::endgroup::"
+          done
 
   # JitPack builds a tag once and never rebuilds it, so it is asked only after every check passed,
   # and the release counts only once the artifacts a consumer resolves are really downloadable.

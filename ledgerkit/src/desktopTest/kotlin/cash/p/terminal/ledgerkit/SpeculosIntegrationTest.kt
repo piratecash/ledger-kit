@@ -1,8 +1,6 @@
 package cash.p.terminal.ledgerkit
 
-import cash.p.terminal.ledgerkit.transport.SpeculosTransport
 import kotlinx.coroutines.runBlocking
-import org.junit.Assume.assumeTrue
 import kotlin.test.Test
 import kotlin.test.assertTrue
 
@@ -10,15 +8,7 @@ import kotlin.test.assertTrue
 class SpeculosIntegrationTest {
     @Test
     fun getAppAndVersion_speculosApp_returnsNameAndVersion() = runBlocking {
-        val port = System.getenv("SPECULOS_APDU_PORT")?.toIntOrNull()
-        assumeTrue("SPECULOS_APDU_PORT is not set", port != null)
-        val transport = SpeculosTransport.connect("127.0.0.1", requireNotNull(port))
-
-        val app = try {
-            transport.getAppAndVersion()
-        } finally {
-            transport.close()
-        }
+        val app = Speculos.transport().getAppAndVersion()
 
         assertTrue(app.name.isNotEmpty() && app.version.isNotEmpty(), "$app")
     }

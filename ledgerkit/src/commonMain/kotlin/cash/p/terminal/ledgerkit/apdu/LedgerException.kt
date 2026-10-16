@@ -16,6 +16,13 @@ public sealed class LedgerException(message: String, cause: Throwable? = null) :
         public val required: String,
     ) : LedgerException("$appName $actual is older than $required")
 
+    /** The app refused the request as malformed or unsupported; raised by app clients for their own status words. */
+    public class InvalidRequest(public val statusWord: Int) :
+        LedgerException("The app refused the request: 0x${statusWord.toString(16).padStart(4, '0')}")
+
+    /** The app finished the request but answered with data that breaks the protocol; nothing of it is used. */
+    public class MalformedResponse(detail: String) : LedgerException("Malformed answer from the device: $detail")
+
     public class TransportClosed(cause: Throwable? = null) : LedgerException("Connection to the device is closed", cause)
 
     public class Unknown(public val statusWord: Int) :

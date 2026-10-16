@@ -11,6 +11,10 @@ Kotlin Multiplatform library that talks to Ledger hardware wallets over APDU, fo
   status words mapped to typed `LedgerException`s
 - `LedgerSession` — serializes every exchange of one operation and opens the requested app
   (`GET_APP_AND_VERSION`, `QUIT_APP`, `OPEN_APP`) with a minimum app version
+- `BitcoinAppClient` — the Bitcoin app 2.x (`CLA E1`): master fingerprint, xpubs, addresses of
+  single-signature `pkh`/`sh(wpkh)`/`wpkh`/`tr` wallet policies, PSBTv2 signing with per-input partial signatures
+- `BtchipLegacyClient` — the legacy btchip protocol (`CLA E0`) of the Litecoin, Dogecoin, Dash and Bitcoin Cash
+  apps: public keys and addresses, legacy and BIP143 (segwit, `SIGHASH_FORKID`) signing through trusted inputs
 
 Targets: **Android** (minSdk 27, JVM 17 bytecode) and **desktop JVM** (JDK 21).
 
@@ -37,8 +41,10 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 ./gradlew -p consumer-smoke compileKotlinDesktop compileDebugKotlinAndroid
 ```
 
-`SpeculosIntegrationTest` runs only when `SPECULOS_APDU_PORT` points at a running emulator.
-CI starts speculos itself once a Nano S Plus app ELF is committed under `apps/`.
+The speculos tests (`*SpeculosTest`, `SpeculosIntegrationTest`) run only when `SPECULOS_APDU_PORT` points at a
+running emulator started with the default seed; `SPECULOS_API_URL` (default `http://127.0.0.1:5000`) is its REST API,
+used to approve signing screens. Each test class skips unless its own app (`Bitcoin`, `Bitcoin Test`, `Litecoin`, `Dogecoin`, `Bitcoin Cash`, `Dash`)
+is the one running. CI runs them for every Nano S Plus app ELF committed under `apps/`, one app at a time.
 
 ## Publishing
 
@@ -48,4 +54,4 @@ A published tag is never rebuilt: a fix needs a new tag.
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE). Third-party code and test vectors are listed in [NOTICE](NOTICE).

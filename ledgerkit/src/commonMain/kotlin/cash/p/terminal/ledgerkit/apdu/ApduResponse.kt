@@ -4,9 +4,9 @@ import cash.p.terminal.ledgerkit.readUInt16
 import cash.p.terminal.ledgerkit.transport.LedgerTransport
 
 public class ApduResponse(public val data: ByteArray, public val statusWord: Int) {
-    /** Returns the data, or throws the error the status word stands for. */
-    public fun requireSuccess(): ByteArray {
-        if (statusWord != StatusWord.OK) throw LedgerException.fromStatusWord(statusWord)
+    /** Returns the data, or throws the error [errorFor] maps the status word to. */
+    public fun requireSuccess(errorFor: (Int) -> LedgerException = LedgerException::fromStatusWord): ByteArray {
+        if (statusWord != StatusWord.OK) throw errorFor(statusWord)
         return data
     }
 
@@ -24,4 +24,7 @@ public class ApduResponse(public val data: ByteArray, public val statusWord: Int
 public suspend fun LedgerTransport.exchange(apdu: Apdu): ApduResponse = ApduResponse.parse(exchange(apdu.toBytes()))
 
 /** Returns the response data, or throws the [LedgerException] for a non-OK status word. */
-public suspend fun LedgerTransport.send(apdu: Apdu): ByteArray = exchange(apdu).requireSuccess()
+public suspend fun LedgerTransport.send(
+    apdu: Apdu,
+    errorFor: (Int) -> LedgerException = LedgerException::fromStatusWord,
+): ByteArray = exchange(apdu).requireSuccess(errorFor)

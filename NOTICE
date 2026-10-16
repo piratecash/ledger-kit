@@ -1,0 +1,22 @@
+ledger-kit
+Copyright (c) 2026 PirateCash Foundation. Licensed under the MIT License (see LICENSE).
+
+This product includes code adapted from, and test vectors taken from, the following projects,
+each licensed under the Apache License, Version 2.0; the full text is in LICENSE-APACHE.
+
+LedgerHQ/app-bitcoin-new — Copyright (c) Ledger SAS
+https://github.com/LedgerHQ/app-bitcoin-new
+  - bitcoin/MerkleTree.kt: adapted from bitcoin_client_rs/src/merkle.rs
+  - bitcoin/ClientCommandInterpreter.kt: adapted from bitcoin_client_rs/src/interpreter.rs and
+    bitcoin_client/ledger_bitcoin/client_command.py
+  - BitcoinAppClient.kt and WalletPolicy.kt follow doc/bitcoin.md and doc/wallet.md
+  - test vectors and PSBT fixtures from test_vectors/*.toml, tests/psbt/singlesig and the
+    merkle.rs unit test
+
+LedgerHQ/ledger-live, libs/ledgerjs/packages/hw-app-btc — Copyright (c) Ledger SAS
+https://github.com/LedgerHQ/ledger-live
+  - bitcoin/BtchipLegacyClient.kt: legacy signing flow and chunking follow createTransaction.ts,
+    getTrustedInput.ts, startUntrustedHashTransactionInput.ts, finalizeInput.ts and signTransaction.ts
+  - bitcoin/SplitTransaction.kt: witness/extension skipping and the trailing extra data follow
+    splitTransaction.ts
+  - recorded APDU exchanges from the hw-app-btc tests used as test vectors

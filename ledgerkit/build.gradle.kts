@@ -1,3 +1,5 @@
+import com.android.build.gradle.tasks.BundleAar
+import org.gradle.jvm.tasks.Jar
 import org.jetbrains.kotlin.gradle.ExperimentalKotlinGradlePluginApi
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
@@ -66,3 +68,8 @@ android {
         targetSdk = 33
     }
 }
+
+// Adapted Apache-2.0 code must ship with its license and notices; a unique path avoids clashes in consumer packages.
+val legalFiles = rootProject.files("LICENSE", "LICENSE-APACHE", "NOTICE")
+tasks.withType<Jar>().configureEach { from(legalFiles) { into("META-INF/ledger-kit") } }
+tasks.withType<BundleAar>().configureEach { from(legalFiles) { into("META-INF/ledger-kit") } }
