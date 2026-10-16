@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+    # Releases are exact numeric SemVer tags (0.1.0); anything else is not a release.
+    tags:
+      - "[0-9]+.[0-9]+.[0-9]+"
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew :ledgerkit:testDebugUnitTest --console=plain
+
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025, macos-26]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew :ledgerkit:desktopTest --console=plain
+
+  publish:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew -PVERSION_NAME=0.0.0-SNAPSHOT publishToMavenLocal --console=plain
+      - run: ./gradlew -p consumer-smoke compileKotlinDesktop compileDebugKotlinAndroid --console=plain
+
+  # Runs the APDU integration tests against the speculos emulator once a Nano S Plus app ELF
+  # is committed under apps/; until then the job passes without doing anything.
+  speculos:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - id: elf
+        run: echo "path=$(ls apps/*.elf 2>/dev/null | head -1)" >> "$GITHUB_OUTPUT"
+      - if: steps.elf.outputs.path != ''
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - if: steps.elf.outputs.path != ''
+        uses: gradle/actions/setup-gradle@v4
+      - name: Start speculos
+        if: steps.elf.outputs.path != ''
+        run: |
+          docker run -d --name speculos -p 9999:9999 -v "$PWD/apps:/speculos/apps" \
+            ghcr.io/ledgerhq/speculos --model nanosp --display headless --apdu-port 9999 \
+            "${{ steps.elf.outputs.path }}"
+          for attempt in $(seq 1 30); do
+            nc -z 127.0.0.1 9999 && exit 0
+            sleep 1
+          done
+          docker logs speculos
+          exit 1
+      - if: steps.elf.outputs.path != ''
+        env:
+          SPECULOS_APDU_PORT: "9999"
+        run: ./gradlew :ledgerkit:desktopTest --tests '*SpeculosIntegrationTest' --console=plain
+
+  # JitPack builds a tag once and never rebuilds it, so it is asked only after every check passed,
+  # and the release counts only once the artifacts a consumer resolves are really downloadable.
+  jitpack:
+    if: github.ref_type == 'tag'
+    needs: [android, desktop, publish, speculos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      TAG: ${{ github.ref_name }}
+      BASE: https://jitpack.io/com/github/piratecash/ledger-kit
+    steps:
+      - name: Build the tag on JitPack and verify the artifacts
+        run: |
+          set -eu
+          curl -s -o /dev/null --max-time 120 "$BASE/$TAG/build.log" || true
+          artifacts="ledgerkit/$TAG/ledgerkit-$TAG.module
+          ledgerkit-android/$TAG/ledgerkit-android-$TAG.aar
+          ledgerkit-desktop/$TAG/ledgerkit-desktop-$TAG.jar"
+          for attempt in $(seq 1 60); do
+            missing=0
+            for path in $artifacts; do
+              curl -fsI --max-time 60 "$BASE/$path" >/dev/null || missing=$((missing + 1))
+            done
+            if [ "$missing" -eq 0 ]; then
+              echo "JitPack published $TAG"
+              exit 0
+            fi
+            echo "waiting for JitPack: $missing artifact(s) missing (attempt $attempt/60)"
+            sleep 30
+          done
+          echo "JitPack did not publish $TAG; build log:" >&2
+          curl -s --max-time 60 "$BASE/$TAG/build.log" | tail -80 >&2
+          exit 1
