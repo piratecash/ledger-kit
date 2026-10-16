@@ -63,7 +63,7 @@ class EthereumSpeculosTest {
         setBlindSigning(false)
 
         assertFailsWith<LedgerException.BlindSigningRequired> { client.signTransaction(PATH, CONTRACT_CALL.hexToByteArray()) }
-        dismissToHome()
+        Speculos.dismissToHome()
     }
 
     @Test
@@ -100,7 +100,7 @@ class EthereumSpeculosTest {
         setBlindSigning(false)
 
         assertFailsWith<LedgerException.BlindSigningRequired> { client.signTypedData(PATH, MAIL_JSON) }
-        dismissToHome()
+        Speculos.dismissToHome()
     }
 
     // Without clear-signing filters the app shows typed data only with blind signing enabled.
@@ -123,30 +123,9 @@ class EthereumSpeculosTest {
         assertEquals(listOf(yParity.toString(), r, s), listOf(signature.yParity.toString(), signature.r.toHexString(), signature.s.toHexString()))
     }
 
-    /** Flips the app's blind signing setting through its menu when it differs from [enabled]. */
     private suspend fun setBlindSigning(enabled: Boolean) {
         val flags = transport.exchange(GET_APP_CONFIGURATION.hexToByteArray())[0].toInt()
-        if ((flags and BLIND_SIGNING_FLAG != 0) == enabled) return
-        dismissToHome()
-        Speculos.press("right")
-        Speculos.press("both")
-        Speculos.press("both")
-        pressUntil("Back", "right")
-        Speculos.press("both")
-        pressUntil(HOME, "left")
-    }
-
-    private fun dismissToHome() {
-        if (HOME !in Speculos.currentScreen()) Speculos.press("both")
-        pressUntil(HOME, "left")
-    }
-
-    private fun pressUntil(screen: String, button: String) {
-        repeat(MAX_PRESSES) {
-            if (screen in Speculos.currentScreen()) return
-            Speculos.press(button)
-        }
-        error("No '$screen' screen")
+        if ((flags and BLIND_SIGNING_FLAG != 0) != enabled) Speculos.toggleFirstSetting()
     }
 
     private companion object {
@@ -156,7 +135,5 @@ class EthereumSpeculosTest {
         val MAIL_JSON = EIP712_FIXTURES.first { it.name == "0" }.json
         const val GET_APP_CONFIGURATION = "e006000000"
         const val BLIND_SIGNING_FLAG = 0x01
-        const val HOME = "is ready"
-        const val MAX_PRESSES = 10
     }
 }

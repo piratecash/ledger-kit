@@ -24,13 +24,14 @@ import org.junit.Assume.assumeTrue
 import kotlin.concurrent.thread
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class SpeculosTransportTest {
     @Test
     fun exchange_speculosFraming_sendsLengthPrefixedApduAndJoinsDataWithStatusWord() = runBlocking {
-        ServerSocket(0).use { server ->
+        loopbackServer().use { server ->
             var received = ""
             val emulator = thread {
                 server.accept().use { socket ->
@@ -46,7 +47,7 @@ class SpeculosTransportTest {
 
             val response = transport.exchange("b001000000".hexToByteArray())
             transport.close()
-            emulator.join()
+            emulator.joinOrFail()
 
             assertEquals("b001000000", received)
             assertEquals("abcd9000", response.toHexString())
@@ -55,7 +56,7 @@ class SpeculosTransportTest {
 
     @Test
     fun exchange_peerAnnouncesHugeResponse_throwsTransportClosed() = runBlocking {
-        ServerSocket(0).use { server ->
+        loopbackServer().use { server ->
             val emulator = thread {
                 server.accept().use { socket ->
                     DataInputStream(socket.getInputStream()).readApdu()
@@ -70,16 +71,16 @@ class SpeculosTransportTest {
 
             assertFailsWith<LedgerException.TransportClosed> { transport.exchange("b001000000".hexToByteArray()) }
             transport.close()
-            emulator.join()
+            emulator.joinOrFail()
         }
     }
 
     @Test
     fun exchange_emulatorClosedConnection_throwsTransportClosed() = runBlocking {
-        ServerSocket(0).use { server ->
+        loopbackServer().use { server ->
             val emulator = thread { server.accept().close() }
             val transport = SpeculosTransport.connect("127.0.0.1", server.localPort)
-            emulator.join()
+            emulator.joinOrFail()
 
             assertFailsWith<LedgerException.TransportClosed> { transport.exchange("b001000000".hexToByteArray()) }
             transport.close()
@@ -88,14 +89,14 @@ class SpeculosTransportTest {
 
     @Test
     fun connect_nothingListening_throwsTransportClosed(): Unit = runBlocking {
-        val port = ServerSocket(0).use { it.localPort }
+        val port = loopbackServer().use { it.localPort }
 
         assertFailsWith<LedgerException.TransportClosed> { SpeculosTransport.connect("127.0.0.1", port) }
     }
 
     @Test
     fun connect_cancelledWhilePeerNeverAccepts_returnsBeforeConnectTimeout() = runBlocking {
-        ServerSocket(0, 1, InetAddress.getLoopbackAddress()).use { server ->
+        loopbackServer(backlog = 1).use { server ->
             val fillers = fillBacklog(server)
             try {
                 val connecting = CoroutineScope(Dispatchers.Default).launch {
@@ -132,7 +133,7 @@ class SpeculosTransportTest {
 
     /** Answers GET_APP_AND_VERSION as Bitcoin 2.1.0 and never answers anything else. */
     private class SilentAfterAppInfoPeer : AutoCloseable {
-        private val server = ServerSocket(0)
+        private val server = loopbackServer()
         private val silentRequests = Semaphore(0)
         private val disconnects = Semaphore(0)
         val port: Int = server.localPort
@@ -181,6 +182,14 @@ class SpeculosTransportTest {
         const val TIMEOUT_MILLIS = 5_000L
         val APP_INFO = ("01" + "07" + "Bitcoin".encodeToByteArray().toHexString() +
             "05" + "2.1.0".encodeToByteArray().toHexString() + "9000").hexToByteArray()
+
+        // The client dials 127.0.0.1; a wildcard bind can share its port with another loopback listener.
+        fun loopbackServer(backlog: Int = 50) = ServerSocket(0, backlog, InetAddress.getLoopbackAddress())
+
+        fun Thread.joinOrFail() {
+            join(TIMEOUT_MILLIS)
+            assertFalse(isAlive, "Emulator thread did not finish")
+        }
     }
 }
 

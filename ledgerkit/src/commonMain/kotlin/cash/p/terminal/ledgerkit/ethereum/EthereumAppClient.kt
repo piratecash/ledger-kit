@@ -1,11 +1,13 @@
 package cash.p.terminal.ledgerkit.ethereum
 
-import cash.p.terminal.ledgerkit.ByteReader
 import cash.p.terminal.ledgerkit.DerivationPath
 import cash.p.terminal.ledgerkit.apdu.Apdu
 import cash.p.terminal.ledgerkit.apdu.LedgerException
 import cash.p.terminal.ledgerkit.apdu.appError
+import cash.p.terminal.ledgerkit.apdu.readKeyAndAddress
+import cash.p.terminal.ledgerkit.apdu.requireAnswerSize
 import cash.p.terminal.ledgerkit.apdu.send
+import cash.p.terminal.ledgerkit.apdu.sendChunks
 import cash.p.terminal.ledgerkit.toUInt32Be
 import cash.p.terminal.ledgerkit.toUInt64Be
 import cash.p.terminal.ledgerkit.transport.LedgerTransport
@@ -34,15 +36,8 @@ public class EthereumAppClient(private val transport: LedgerTransport) {
         require(chainId == null || chainId >= 0) { "Negative chain id" }
         val data = path.toApduBytes() + (chainId?.toUInt64Be() ?: ByteArray(0))
         val answer = send(GET_ADDRESS, if (display) 1 else 0, 0, data)
-        return readAnswer("address") {
-            val reader = ByteReader(answer)
-            val publicKey = reader.readBytes(reader.readByte())
-            val address = reader.readBytes(reader.readByte()).decodeToString()
-            reader.requireEnd()
-            check(publicKey.size == PUBLIC_KEY_SIZE && publicKey[0] == UNCOMPRESSED_KEY) { "public key" }
-            check(ADDRESS_HEX.matches(address)) { "address" }
-            EthereumAddress(publicKey, "0x$address")
-        }
+        val (publicKey, address) = readKeyAndAddress(answer, ADDRESS_HEX)
+        return EthereumAddress(publicKey, "0x$address")
     }
 
     /**
@@ -88,8 +83,7 @@ public class EthereumAppClient(private val transport: LedgerTransport) {
      * (`ticker length, ticker, address, decimals, chain id, signature`), passed through as is.
      */
     public suspend fun provideErc20TokenInformation(descriptor: ByteArray) {
-        val assetIndex = send(PROVIDE_ERC20_TOKEN_INFORMATION, 0, 0, descriptor)
-        if (assetIndex.size != 1) throw LedgerException.MalformedResponse("ERC-20 asset index")
+        send(PROVIDE_ERC20_TOKEN_INFORMATION, 0, 0, descriptor).requireAnswerSize(1, "ERC-20 asset index")
     }
 
     private fun UnsignedTransaction.chunkSize(payloadSize: Int): Int {
@@ -105,13 +99,10 @@ public class EthereumAppClient(private val transport: LedgerTransport) {
         chunkSize: Int,
         errorFor: (Int) -> LedgerException,
     ): ByteArray {
-        val chunks = payload.asList().chunked(chunkSize)
-        chunks.dropLast(1).forEachIndexed { index, chunk ->
-            val answer = send(ins, if (index == 0) P1_FIRST else P1_MORE, 0, chunk.toByteArray(), errorFor)
-            // An answer before the last chunk means the app signed only part of the payload.
-            if (answer.isNotEmpty()) throw LedgerException.MalformedResponse("answer before the last chunk")
+        val chunks = payload.asList().chunked(chunkSize).map { it.toByteArray() }
+        return transport.sendChunks(chunks, errorFor) { index, chunk ->
+            Apdu(CLA, ins, if (index == 0) P1_FIRST else P1_MORE, 0, chunk)
         }
-        return send(ins, if (chunks.size == 1) P1_FIRST else P1_MORE, 0, chunks.last().toByteArray(), errorFor)
     }
 
     private suspend fun send(
@@ -134,8 +125,6 @@ public class EthereumAppClient(private val transport: LedgerTransport) {
         const val P1_FIRST = 0x00
         const val P1_MORE = 0x80
 
-        const val PUBLIC_KEY_SIZE = 65
-        const val UNCOMPRESSED_KEY: Byte = 0x04
         val ADDRESS_HEX = Regex("[0-9a-fA-F]{40}")
     }
 }
@@ -154,17 +143,10 @@ private const val SCALAR_SIZE = 32
 private const val MESSAGE_V_BASE = 27
 
 internal fun signature(answer: ByteArray, yParityOf: (Int) -> Int?): EthereumSignature {
-    if (answer.size != SIGNATURE_SIZE) throw LedgerException.MalformedResponse("signature of ${answer.size} bytes")
+    answer.requireAnswerSize(SIGNATURE_SIZE, "signature")
     val v = answer[0].toInt() and 0xFF
     val yParity = yParityOf(v) ?: throw LedgerException.MalformedResponse("signature v $v")
     return EthereumSignature(v, answer.copyOfRange(1, 1 + SCALAR_SIZE), answer.copyOfRange(1 + SCALAR_SIZE, SIGNATURE_SIZE), yParity)
 }
 
 internal fun messageYParity(v: Int): Int? = (v - MESSAGE_V_BASE).takeIf { it in 0..1 }
-
-private inline fun <T> readAnswer(what: String, read: () -> T): T =
-    try {
-        read()
-    } catch (_: IllegalStateException) {
-        throw LedgerException.MalformedResponse(what)
-    }

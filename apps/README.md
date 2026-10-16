@@ -27,6 +27,7 @@ with Ledger's app builder images (pinned by digest in the script): `ledger-app-b
 
 Not built: the Tron app ([LedgerHQ/app-tron](https://github.com/LedgerHQ/app-tron), MIT). It compiles
 `proto/core/Contract.proto`, which carries a GPL-3.0 header, into the binary.
+The Tron speculos tests run only locally, against a Tron 0.8.0 Nano S Plus build you put at `apps/tron.elf`.
 
 ## Running the speculos tests locally
 

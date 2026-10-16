@@ -10,6 +10,12 @@ public class DerivationPath(public val indices: List<UInt>) {
     internal fun toApduBytes(): ByteArray =
         byteArrayOf(indices.size.toByte()) + indices.fold(ByteArray(0)) { bytes, index -> bytes + index.toUInt32Be() }
 
+    /** [toApduBytes] for apps that derive Ed25519 keys, which have no unhardened derivation. */
+    internal fun toHardenedApduBytes(): ByteArray {
+        require(indices.all { it >= HARDENED }) { "Ed25519 derivation needs every index hardened: $this" }
+        return toApduBytes()
+    }
+
     /** Key-origin form without the `m/` prefix, hardened indices marked with `'`: `84'/0'/0'`. */
     override fun toString(): String = indices.joinToString("/") { index ->
         if (index >= HARDENED) "${index - HARDENED}'" else index.toString()

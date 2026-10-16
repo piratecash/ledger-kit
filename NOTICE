@@ -33,3 +33,25 @@ https://github.com/LedgerHQ/ledger-live
   - ethereum/Eip712Type.kt and the EIP-712 flow: type and value encoding follow modules/EIP712/utils.ts
     and index.ts
   - recorded APDU exchanges and EIP-712 message fixtures from the hw-app-eth tests used as test vectors
+
+LedgerHQ/app-solana — Copyright (c) the app-solana contributors
+https://github.com/LedgerHQ/app-solana
+  - solana/SolanaAppClient.kt follows doc/api.md and the status words of src/apdu.h
+
+LedgerHQ/app-stellar — Copyright (c) overcat and the app-stellar contributors
+https://github.com/LedgerHQ/app-stellar
+  - stellar/StellarAppClient.kt follows docs/COMMANDS.md
+
+LedgerHQ/ledger-live, libs/ledgerjs/packages/hw-app-solana, hw-app-trx, hw-app-str and hw-bolos — Copyright (c) Ledger SAS
+https://github.com/LedgerHQ/ledger-live
+  - solana/SolanaAppClient.kt: chunk flags and the descriptor signature TLV follow Solana.ts and descriptor.ts
+  - tron/TronAppClient.kt: field-aligned transaction chunking follows signTransaction in Trx.ts
+  - stellar/StellarAppClient.kt: chunk flags follow Str.ts
+  - Pki.kt: certificate framing follows loadPKI.ts, its status words PKIError.ts
+  - recorded APDU exchanges from the hw-app-solana, hw-app-trx and hw-app-str tests used as test vectors
+
+The following project is MIT-licensed; only its documentation was followed, no code was taken.
+
+LedgerHQ/app-tron — Copyright (c) 2018 Fernando Sobreira
+https://github.com/LedgerHQ/app-tron
+  - tron/TronAppClient.kt follows docs/APDU.md

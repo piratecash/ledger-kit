@@ -53,11 +53,50 @@ object Speculos {
                 }
             }
         }
-        try {
+        val result = try {
             block()
         } finally {
             walker.cancel()
         }
+        // The Stellar app drops a request that arrives while its "signed" screen is still up.
+        awaitHome()
+        result
+    }
+
+    /**
+     * Flips the first switch of the app's settings menu, where the tested apps keep their blind signing (Tron: its
+     * transactions data) setting.
+     */
+    fun toggleFirstSetting() {
+        dismissToHome()
+        press("right")
+        press("both")
+        press("both")
+        pressUntil("Back", "right")
+        press("both")
+        pressUntil(READY_SCREEN, "left")
+    }
+
+    private suspend fun awaitHome() {
+        repeat(HOME_POLLS) {
+            if (READY_SCREEN in currentScreen()) return
+            delay(STEP)
+        }
+        error("The app did not return to its home screen")
+    }
+
+    /** Leaves an error or info screen and walks back to the app's home screen. */
+    fun dismissToHome() {
+        if (READY_SCREEN !in currentScreen()) press("both")
+        pressUntil(READY_SCREEN, "left")
+    }
+
+    private fun pressUntil(screen: String, button: String) {
+        repeat(MAX_PRESSES) {
+            if (screen in currentScreen()) return
+            press(button)
+        }
+        error("No '$screen' screen")
     }
 
     fun currentScreen(): String {
@@ -75,5 +114,10 @@ object Speculos {
 
     private val STEP = 300.milliseconds
     private const val READY_SCREEN = "is ready"
-    private val APPROVE_SCREENS = listOf("Approve", "Accept", "accept risk", "Sign transaction", "Sign message")
+    private const val MAX_PRESSES = 10
+    private const val HOME_POLLS = 30
+
+    // Tron asks to "Continue" past its extra data warning.
+    private val APPROVE_SCREENS =
+        listOf("Approve", "Accept", "accept risk", "Sign transaction", "Sign Transaction", "Sign message", "Continue")
 }
