@@ -14,6 +14,8 @@ internal fun Long.toUInt32Le(): ByteArray {
 
 internal fun Long.toUInt64Le(): ByteArray = ByteArray(8) { (this shr (it * 8)).toByte() }
 
+internal fun Long.toUInt64Be(): ByteArray = toUInt64Le().reversedArray()
+
 /** Bitcoin CompactSize. */
 internal fun compactSize(value: Long): ByteArray = when {
     value < 0 -> throw IllegalArgumentException("Negative CompactSize: $value")

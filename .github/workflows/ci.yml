@@ -59,23 +59,28 @@ jobs:
       - run: ./gradlew -PVERSION_NAME=0.0.0-SNAPSHOT publishToMavenLocal --console=plain
       - run: ./gradlew -p consumer-smoke compileKotlinDesktop compileDebugKotlinAndroid --console=plain
 
-  # Runs the speculos tests against every Nano S Plus app ELF committed under apps/, one app at a
-  # time; each test class skips unless its own app is running. Without ELFs the job does nothing.
+  # Builds the Nano S Plus app ELFs (see apps/README.md) and runs the speculos tests against each,
+  # one app at a time; each test class skips unless its own app is running.
   speculos:
     runs-on: ubuntu-24.04
+    # A cold build of every app takes most of this; a cache hit skips it.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
-      - id: elf
-        run: echo "count=$(ls apps/*.elf 2>/dev/null | wc -l)" >> "$GITHUB_OUTPUT"
-      - if: steps.elf.outputs.count != '0'
-        uses: actions/setup-java@v5
+      # The script pins every app commit and builder image, so its hash identifies the ELFs.
+      - id: apps
+        uses: actions/cache@v4
+        with:
+          path: apps/*.elf
+          key: speculos-apps-${{ hashFiles('scripts/build-speculos-apps.sh') }}
+      - if: steps.apps.outputs.cache-hit != 'true'
+        run: scripts/build-speculos-apps.sh
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-      - if: steps.elf.outputs.count != '0'
-        uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v4
       - name: Run the speculos tests for each app
-        if: steps.elf.outputs.count != '0'
         env:
           SPECULOS_APDU_PORT: "9999"
           SPECULOS_API_URL: http://127.0.0.1:5000

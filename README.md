@@ -15,6 +15,11 @@ Kotlin Multiplatform library that talks to Ledger hardware wallets over APDU, fo
   single-signature `pkh`/`sh(wpkh)`/`wpkh`/`tr` wallet policies, PSBTv2 signing with per-input partial signatures
 - `BtchipLegacyClient` — the legacy btchip protocol (`CLA E0`) of the Litecoin, Dogecoin, Dash and Bitcoin Cash
   apps: public keys and addresses, legacy and BIP143 (segwit, `SIGHASH_FORKID`) signing through trusted inputs
+- `EthereumAppClient` — the Ethereum app 1.x (`CLA E0`): public key and address, signing of EIP-155 legacy and
+  EIP-2930/EIP-1559 transactions from their unsigned RLP, `personal_sign`, EIP-712 typed data from its JSON
+  (struct definitions and implementations, no pre-hashed mode) and CAL-signed ERC-20 descriptors passed through as
+  given. Signatures come back as the app reports them plus the checked y parity; `EthereumSignature` documents how
+  to read `v` for each kind. Pre-EIP-155 transactions are refused: they are valid on every chain
 
 Targets: **Android** (minSdk 27, JVM 17 bytecode) and **desktop JVM** (JDK 21).
 
@@ -43,8 +48,11 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 
 The speculos tests (`*SpeculosTest`, `SpeculosIntegrationTest`) run only when `SPECULOS_APDU_PORT` points at a
 running emulator started with the default seed; `SPECULOS_API_URL` (default `http://127.0.0.1:5000`) is its REST API,
-used to approve signing screens. Each test class skips unless its own app (`Bitcoin`, `Bitcoin Test`, `Litecoin`, `Dogecoin`, `Bitcoin Cash`, `Dash`)
-is the one running. CI runs them for every Nano S Plus app ELF committed under `apps/`, one app at a time.
+used to approve signing screens. Each test class skips unless its own app (`Bitcoin`, `Bitcoin Test`, `Litecoin`, `Dogecoin`, `Bitcoin Cash`, `Dash`,
+`Ethereum`)
+is the one running; the Ethereum tests switch the app's blind signing setting through its menu as they need it.
+CI builds the Nano S Plus app ELFs with `scripts/build-speculos-apps.sh` and runs them one app at a time;
+[apps/README.md](apps/README.md) lists the pinned apps and how to run the tests locally.
 
 ## Publishing
 

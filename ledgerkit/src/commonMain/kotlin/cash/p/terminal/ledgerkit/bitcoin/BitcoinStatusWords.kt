@@ -1,6 +1,7 @@
 package cash.p.terminal.ledgerkit.bitcoin
 
 import cash.p.terminal.ledgerkit.apdu.LedgerException
+import cash.p.terminal.ledgerkit.apdu.appError
 
 // Shared by the Bitcoin app 2.x (src/boilerplate/sw.h) and the legacy btchip apps (apdu_constants.h).
 private val INVALID_REQUEST_STATUS_WORDS = setOf(
@@ -14,6 +15,4 @@ private val INVALID_REQUEST_STATUS_WORDS = setOf(
     0xB008, // signature failure
 )
 
-internal fun bitcoinAppError(statusWord: Int): LedgerException =
-    if (statusWord in INVALID_REQUEST_STATUS_WORDS) LedgerException.InvalidRequest(statusWord)
-    else LedgerException.fromStatusWord(statusWord)
+internal fun bitcoinAppError(statusWord: Int): LedgerException = appError(statusWord, INVALID_REQUEST_STATUS_WORDS)

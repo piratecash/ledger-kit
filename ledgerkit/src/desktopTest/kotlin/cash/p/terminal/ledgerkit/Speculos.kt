@@ -60,12 +60,12 @@ object Speculos {
         }
     }
 
-    private fun currentScreen(): String {
+    fun currentScreen(): String {
         val request = HttpRequest.newBuilder(URI("$api/events?currentscreenonly=true")).GET().build()
         return http.send(request, HttpResponse.BodyHandlers.ofString()).body()
     }
 
-    private fun press(button: String) {
+    fun press(button: String) {
         val request = HttpRequest.newBuilder(URI("$api/button/$button"))
             .POST(HttpRequest.BodyPublishers.ofString("""{"action":"press-and-release"}"""))
             .header("Content-Type", "application/json")
@@ -75,5 +75,5 @@ object Speculos {
 
     private val STEP = 300.milliseconds
     private const val READY_SCREEN = "is ready"
-    private val APPROVE_SCREENS = listOf("Approve", "Accept", "Sign transaction")
+    private val APPROVE_SCREENS = listOf("Approve", "Accept", "accept risk", "Sign transaction", "Sign message")
 }

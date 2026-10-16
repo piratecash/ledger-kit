@@ -20,3 +20,16 @@ https://github.com/LedgerHQ/ledger-live
   - bitcoin/SplitTransaction.kt: witness/extension skipping and the trailing extra data follow
     splitTransaction.ts
   - recorded APDU exchanges from the hw-app-btc tests used as test vectors
+
+LedgerHQ/app-ethereum — Copyright (c) Ledger SAS
+https://github.com/LedgerHQ/app-ethereum
+  - ethereum/EthereumAppClient.kt follows doc/apdu.md, the status words and v computation of
+    src/features/sign_tx and the chunking of client/src/ledger_app_clients/ethereum/command_builder.py
+  - ethereum/Eip712Type.kt follows doc/eip712.md
+
+LedgerHQ/ledger-live, libs/ledgerjs/packages/hw-app-eth — Copyright (c) Ledger SAS
+https://github.com/LedgerHQ/ledger-live
+  - ethereum/EthereumAppClient.kt: legacy transaction chunking follows safeChunkTransaction in utils.ts
+  - ethereum/Eip712Type.kt and the EIP-712 flow: type and value encoding follow modules/EIP712/utils.ts
+    and index.ts
+  - recorded APDU exchanges and EIP-712 message fixtures from the hw-app-eth tests used as test vectors
