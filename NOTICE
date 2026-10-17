@@ -60,6 +60,17 @@ LedgerHQ/app-thorchain — Copyright 2018-2020 Zondax GmbH
 https://github.com/LedgerHQ/app-thorchain
   - thorchain/ThorchainAppClient.kt follows docs/APDUSPEC.md and the status words of app/src/apdu_handler.c
 
+LedgerHQ/app-zcash — Copyright (c) Ledger SAS
+https://github.com/LedgerHQ/app-zcash
+  - zcash/ZcashAppClient.kt and zcash/ZcashPcztPackets.kt follow docs/APDU.md and docs/PCZT_APDU.md
+  - the viewing key and address vectors of tests/standalone/test_pubkey_cmd.py
+
+LedgerHQ/device-sdk-ts, packages/signer/signer-zcash — Copyright (c) Ledger SAS
+https://github.com/LedgerHQ/device-sdk-ts
+  - zcash/ZcashPcztPackets.kt: packet layout follows src/internal/app-binder/command/utils/pcztSerializer.ts
+  - zcash/ZcashAppClient.kt: the signing order follows src/internal/app-binder/task/SignPcztTransactionTask.ts
+  - the PCZT fixtures of task/__fixtures__/pcztFixtures.ts and pcztSerializer.test.ts used as test vectors
+
 thorchain/ledger-thorchain-js — Copyright 2019 ZondaX GmbH
 https://github.com/thorchain/ledger-thorchain-js
   - thorchain/ThorchainAppClient.kt: path encoding and chunking follow src/helper.ts and src/app.ts

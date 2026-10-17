@@ -143,8 +143,10 @@ object Speculos {
     private const val CHOICES = 2
     private const val SETTINGS_ENTRIES = 3
 
-    // Tron asks to "Continue" past its extra data warning; Zondax apps (THORChain) write "APPROVE".
+    // Tron asks to "Continue" past its extra data warning; Zondax apps (THORChain) write "APPROVE"; Zcash ends its
+    // address review on a screen of just "Confirm".
     private val APPROVE_SCREENS = listOf(
         "Approve", "APPROVE", "Accept", "accept risk", "Sign transaction", "Sign Transaction", "Sign message", "Continue",
+        "\"text\": \"Confirm\"",
     )
 }

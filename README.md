@@ -34,6 +34,11 @@ Kotlin Multiplatform library that talks to Ledger hardware wallets over APDU, fo
 - `ThorchainAppClient` — the THORChain app (`CLA 55`): compressed public key and `thor1…` address, signing of a legacy
   amino JSON sign doc the caller builds (`thorchain/MsgSend`, `thorchain/MsgDeposit`); the app's DER signature comes
   back as the 64-byte low-s `r || s` Cosmos SDK expects
+- `ZcashAppClient` — the Zcash app 3.9+ (`CLA E0`): the `uview1…` unified full viewing key (transparent + Orchard)
+  and Orchard-only `u1…` address of an account, and PCZT signing of transparent inputs and Orchard and Ironwood
+  (V6) actions from the fields of a proved PCZT; dummy actions are left to the host. A key or signing command past
+  the app's per-run derivation cap raises `LedgerException.KeyDerivationLimit`; reopening the app clears it. Transparent addresses come from
+  `BtchipLegacyClient`
 
 Each client maps its app's refusal for a disabled setting (blind signing; Tron's transactions data or custom
 contracts) to `LedgerException.BlindSigningRequired`. Ed25519 apps (Solana, Stellar, TON) take hardened paths only.

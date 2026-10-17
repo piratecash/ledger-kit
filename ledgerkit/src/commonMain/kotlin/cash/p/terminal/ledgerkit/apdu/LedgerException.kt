@@ -7,6 +7,9 @@ public sealed class LedgerException(message: String, cause: Throwable? = null) :
     public class WrongAppOpen : LedgerException("Another app is open on the device")
     public class DataTooLarge : LedgerException("Data is too large for the device")
 
+    /** App resources exhausted for this session; reopening the app restores them. */
+    public class KeyDerivationLimit : LedgerException("The device app ran out of resources for this session; reopen the app")
+
     /** Raised by app clients for their own status word. */
     public class BlindSigningRequired : LedgerException("Blind signing is disabled in the device app")
 
