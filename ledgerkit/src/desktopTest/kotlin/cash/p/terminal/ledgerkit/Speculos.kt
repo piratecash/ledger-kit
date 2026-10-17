@@ -3,16 +3,19 @@ package cash.p.terminal.ledgerkit
 import cash.p.terminal.ledgerkit.transport.LedgerTransport
 import cash.p.terminal.ledgerkit.transport.SpeculosTransport
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import org.junit.Assume.assumeTrue
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.minutes
 
 /**
  * A running speculos emulator: `SPECULOS_APDU_PORT` for APDUs, `SPECULOS_API_URL` (default
@@ -40,21 +43,26 @@ object Speculos {
         return shared
     }
 
-    /** Runs [block] while pressing through the review screens and approving on the first approval screen. */
+    /**
+     * Runs [block] while pressing through the review screens and approving on the first approval screen; fails when
+     * no approval comes within [APPROVAL_TIMEOUT] instead of waiting on the device forever.
+     */
     suspend fun <T> approving(block: suspend () -> T): T = coroutineScope {
         val walker = launch(Dispatchers.IO) {
             while (true) {
                 delay(STEP)
                 val screen = currentScreen()
                 when {
-                    APPROVE_SCREENS.any { it in screen } && "Reject" !in screen -> press("both")
+                    isApproval(screen) -> press("both")
                     isHome(screen) -> Unit
                     else -> press("right")
                 }
             }
         }
         val result = try {
-            block()
+            withTimeout(APPROVAL_TIMEOUT) { block() }
+        } catch (timeout: TimeoutCancellationException) {
+            throw AssertionError("No approval within $APPROVAL_TIMEOUT on: ${currentScreen()}", timeout)
         } finally {
             walker.cancel()
         }
@@ -119,6 +127,12 @@ object Speculos {
         error("The expected screen did not come up")
     }
 
+    // Zcash ends its address review on a screen of just "Confirm"; the legacy Bitcoin apps open theirs with "Confirm"
+    // over "transaction", which has to be scrolled past.
+    private fun isApproval(screen: String): Boolean =
+        SCREEN_TEXT.findAll(screen).map { it.groupValues[1] }.toList() == listOf("Confirm") ||
+            APPROVE_SCREENS.any { it in screen } && "Reject" !in screen
+
     // Zondax apps (THORChain) show their name over a "Ready" line instead of "<app> is ready".
     private fun isHome(screen: String): Boolean = READY_SCREEN in screen || ZONDAX_READY_TEXT in screen
 
@@ -136,6 +150,8 @@ object Speculos {
     }
 
     private val STEP = 300.milliseconds
+    private val APPROVAL_TIMEOUT = 3.minutes
+    private val SCREEN_TEXT = Regex("\"text\": \"([^\"]*)\"")
     private const val READY_SCREEN = "is ready"
     private const val ZONDAX_READY_TEXT = "\"text\": \"Ready\""
     private const val MAX_PRESSES = 10
@@ -143,10 +159,8 @@ object Speculos {
     private const val CHOICES = 2
     private const val SETTINGS_ENTRIES = 3
 
-    // Tron asks to "Continue" past its extra data warning; Zondax apps (THORChain) write "APPROVE"; Zcash ends its
-    // address review on a screen of just "Confirm".
+    // Tron asks to "Continue" past its extra data warning; Zondax apps (THORChain) write "APPROVE".
     private val APPROVE_SCREENS = listOf(
         "Approve", "APPROVE", "Accept", "accept risk", "Sign transaction", "Sign Transaction", "Sign message", "Continue",
-        "\"text\": \"Confirm\"",
     )
 }
