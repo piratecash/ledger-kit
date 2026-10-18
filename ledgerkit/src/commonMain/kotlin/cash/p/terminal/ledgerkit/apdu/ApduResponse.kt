@@ -17,7 +17,7 @@ public class ApduResponse(public val data: ByteArray, public val statusWord: Int
             return ApduResponse(raw.copyOfRange(0, dataSize), raw.readUInt16(dataSize))
         }
 
-        private const val STATUS_WORD_SIZE = 2
+        internal const val STATUS_WORD_SIZE = 2
     }
 }
 

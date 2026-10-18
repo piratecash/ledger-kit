@@ -20,6 +20,7 @@ class FakeLedger(
     var locked = false
     var unplugged = false
     var answersAppCommands = true
+    var truncatesAppAnswers = false
 
     val provider = LedgerTransportProvider {
         if (transports.isNotEmpty() && failingReopens > 0) {
@@ -45,7 +46,7 @@ class FakeLedger(
                 else -> {
                     commands += "APP"
                     if (!answersAppCommands) awaitCancellation()
-                    statusWord(StatusWord.OK)
+                    if (truncatesAppAnswers) byteArrayOf(0x90.toByte()) else statusWord(StatusWord.OK)
                 }
             }
         }

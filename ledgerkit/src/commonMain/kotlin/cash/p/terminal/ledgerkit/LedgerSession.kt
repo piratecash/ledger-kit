@@ -1,6 +1,7 @@
 package cash.p.terminal.ledgerkit
 
 import cash.p.terminal.ledgerkit.apdu.Apdu
+import cash.p.terminal.ledgerkit.apdu.ApduResponse
 import cash.p.terminal.ledgerkit.apdu.LedgerException
 import cash.p.terminal.ledgerkit.apdu.send
 import cash.p.terminal.ledgerkit.transport.LedgerTransport
@@ -144,7 +145,7 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
 
     private class CheckedApp(val transport: LedgerTransport, val info: LedgerAppInfo)
 
-    /** Counts exchanges that have not returned a whole answer: in flight on another thread, or failed. */
+    /** Counts exchanges without a whole answer — one ending in a status word: in flight, failed or malformed. */
     private class TrackedTransport(private val inner: LedgerTransport) : LedgerTransport {
         private val unsettled = AtomicInt(0)
 
@@ -152,7 +153,9 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
 
         override suspend fun exchange(apdu: ByteArray): ByteArray {
             unsettled.addAndFetch(1)
-            return inner.exchange(apdu).also { unsettled.addAndFetch(-1) }
+            return inner.exchange(apdu).also {
+                if (it.size >= ApduResponse.STATUS_WORD_SIZE) unsettled.addAndFetch(-1)
+            }
         }
 
         override fun close() = inner.close()

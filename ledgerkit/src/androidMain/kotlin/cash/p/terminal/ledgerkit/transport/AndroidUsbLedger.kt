@@ -42,6 +42,9 @@ private class AndroidUsbPipe(
     private val inEndpoint: UsbEndpoint,
     private val outEndpoint: UsbEndpoint,
 ) : HidPacketPipe {
+    @Volatile
+    private var closed = false
+
     override fun write(packet: ByteArray) {
         val written = connection.bulkTransfer(outEndpoint, packet, packet.size, WRITE_TIMEOUT_MILLIS)
         if (written != packet.size) throw LedgerException.TransportClosed()
@@ -51,12 +54,13 @@ private class AndroidUsbPipe(
         val buffer = ByteArray(LedgerHidFraming.PACKET_SIZE)
         val read = connection.bulkTransfer(inEndpoint, buffer, buffer.size, timeoutMillis)
         if (read > 0) return buffer.copyOf(read)
-        // bulkTransfer reports a timeout and a detached device the same way.
-        if (device !in usbManager.deviceList.values) throw LedgerException.TransportClosed()
+        // bulkTransfer reports a timeout, a detached device and a closed connection the same way.
+        if (closed || device !in usbManager.deviceList.values) throw LedgerException.TransportClosed()
         return null
     }
 
     override fun close() {
+        closed = true
         connection.releaseInterface(hidInterface)
         connection.close()
     }

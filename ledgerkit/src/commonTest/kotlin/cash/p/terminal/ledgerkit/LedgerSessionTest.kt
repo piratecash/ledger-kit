@@ -177,6 +177,18 @@ class LedgerSessionTest {
     }
 
     @Test
+    fun withApp_answerWithoutStatusWord_closesTransport() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin").apply { truncatesAppAnswers = true }
+        val session = LedgerSession(ledger.provider)
+
+        assertFailsWith<IllegalStateException> {
+            session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        }
+
+        assertTrue(ledger.transports.single().closed)
+    }
+
+    @Test
     fun withApp_consecutiveOperations_reuseTransport() = runTest {
         val ledger = FakeLedger(currentApp = "Bitcoin")
         val session = LedgerSession(ledger.provider)
