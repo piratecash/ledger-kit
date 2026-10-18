@@ -17,7 +17,9 @@ class FakeLedger(
     var locksOnAppSwitch = false
     var silentReopens = false
     var afterAppInfo: () -> Unit = {}
-    private var locked = false
+    var locked = false
+    var unplugged = false
+    var answersAppCommands = true
 
     val provider = LedgerTransportProvider {
         if (transports.isNotEmpty() && failingReopens > 0) {
@@ -34,7 +36,7 @@ class FakeLedger(
         private var reenumerated = false
 
         override suspend fun exchange(apdu: ByteArray): ByteArray {
-            if (closed || reenumerated) throw LedgerException.TransportClosed()
+            if (closed || reenumerated || unplugged) throw LedgerException.TransportClosed()
             if (silent) awaitCancellation()
             return when ((apdu[0].toInt() and 0xFF) to (apdu[1].toInt() and 0xFF)) {
                 0xB0 to 0x01 -> appAndVersion()
@@ -42,6 +44,7 @@ class FakeLedger(
                 0xE0 to 0xD8 -> openApp(apdu.decodeToString(5, apdu.size))
                 else -> {
                     commands += "APP"
+                    if (!answersAppCommands) awaitCancellation()
                     statusWord(StatusWord.OK)
                 }
             }

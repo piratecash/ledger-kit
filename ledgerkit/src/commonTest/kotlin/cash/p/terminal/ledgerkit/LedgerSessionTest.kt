@@ -4,6 +4,7 @@ import cash.p.terminal.ledgerkit.apdu.Apdu
 import cash.p.terminal.ledgerkit.apdu.LedgerException
 import cash.p.terminal.ledgerkit.apdu.send
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.launch
@@ -13,6 +14,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -133,7 +135,20 @@ class LedgerSessionTest {
     }
 
     @Test
-    fun withApp_cancelledDuringBlock_closesTransport() = runTest {
+    fun withApp_cancelledDuringExchange_closesTransport() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin").apply { answersAppCommands = false }
+        val session = LedgerSession(ledger.provider)
+        val job = launch { session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) } }
+        advanceUntilIdle()
+
+        job.cancel()
+        job.join()
+
+        assertTrue(ledger.transports.single().closed)
+    }
+
+    @Test
+    fun withApp_cancelledBetweenExchanges_keepsTransport() = runTest {
         val ledger = FakeLedger(currentApp = "Bitcoin")
         val session = LedgerSession(ledger.provider)
         val job = launch { session.withApp("Bitcoin", "2.0.0") { awaitCancellation() } }
@@ -142,7 +157,23 @@ class LedgerSessionTest {
         job.cancel()
         job.join()
 
-        assertTrue(ledger.transports.single().closed)
+        assertFalse(ledger.transports.single().closed)
+    }
+
+    @Test
+    fun withApp_blockFailsAfterWholeAnswers_keepsTransport() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider)
+
+        assertFailsWith<IllegalStateException> {
+            session.withApp("Bitcoin", "2.0.0") {
+                it.send(appCommand)
+                error("refused, as the caller reads the answer")
+            }
+        }
+
+        assertFalse(ledger.transports.single().closed)
+        assertEquals("Bitcoin", session.openAppName(admit = {}))
     }
 
     @Test
@@ -170,5 +201,105 @@ class LedgerSessionTest {
         advanceUntilIdle()
 
         assertTrue(secondStarted)
+    }
+
+    @Test
+    fun withApp_heldHandleDiedSinceLastOperation_reopensAndRuns() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        ledger.transports.single().close()
+
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+
+        assertEquals(listOf("GET", "APP", "GET", "APP"), ledger.commands)
+        assertEquals(2, ledger.transports.size)
+    }
+
+    @Test
+    fun withApp_admitRefuses_exchangesNothingAndKeepsConnection() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+
+        assertFailsWith<IllegalStateException> {
+            session.withApp("Bitcoin", "2.0.0", admit = { error("refused") }) { it.send(appCommand) }
+        }
+
+        assertEquals(listOf("GET", "APP"), ledger.commands)
+        assertFalse(ledger.transports.single().closed)
+    }
+
+    @Test
+    fun withApp_conditionChangesWhileQueued_admitsByConditionAtAcquisition() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider)
+        val firstMayFinish = CompletableDeferred<Unit>()
+        var allowed = true
+        launch { session.withApp("Bitcoin", "2.0.0") { firstMayFinish.await() } }
+        val queued = async {
+            runCatching { session.withApp("Bitcoin", "2.0.0", admit = { check(allowed) }) { it.send(appCommand) } }
+        }
+        advanceUntilIdle()
+
+        allowed = false
+        firstMayFinish.complete(Unit)
+
+        assertTrue(queued.await().isFailure)
+        assertEquals(listOf("GET"), ledger.commands)
+    }
+
+    @Test
+    fun openAppName_otherAppOpenedAfterOperation_answersOverKeptConnectionWithoutSwitching() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        ledger.currentApp = "Ethereum"
+
+        assertEquals("Ethereum", session.openAppName(admit = {}))
+        assertEquals(listOf("GET", "APP", "GET"), ledger.commands)
+        assertEquals(1, ledger.transports.size)
+    }
+
+    @Test
+    fun openAppName_admitRefuses_exchangesNothing() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+
+        assertFailsWith<IllegalStateException> { session.openAppName(admit = { error("background") }) }
+
+        assertEquals(listOf("GET", "APP"), ledger.commands)
+    }
+
+    @Test
+    fun openAppName_noConnectionHeld_returnsNullWithoutOpeningOne() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+
+        assertNull(LedgerSession(ledger.provider).openAppName(admit = {}))
+        assertTrue(ledger.transports.isEmpty())
+    }
+
+    @Test
+    fun openAppName_deviceLocked_returnsNullAndKeepsConnection() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        ledger.locked = true
+
+        assertNull(session.openAppName(admit = {}))
+        assertFalse(ledger.transports.single().closed)
+    }
+
+    @Test
+    fun openAppName_deviceUnplugged_throwsAndDropsConnection() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        ledger.unplugged = true
+
+        assertFailsWith<LedgerException.TransportClosed> { session.openAppName(admit = {}) }
+        assertTrue(ledger.transports.single().closed)
+        assertNull(session.openAppName(admit = {}))
     }
 }

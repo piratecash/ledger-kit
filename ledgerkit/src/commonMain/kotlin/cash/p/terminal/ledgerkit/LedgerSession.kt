@@ -10,6 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.concurrent.atomics.AtomicInt
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
 import kotlin.time.Duration.Companion.milliseconds
@@ -31,17 +32,56 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
         appName: String,
         minVersion: String,
         block: suspend (LedgerTransport) -> T,
+    ): T = withApp(appName, minVersion, admit = {}, block)
+
+    /**
+     * [withApp] that calls [admit] once it holds the device and before any exchange: an operation queued
+     * behind another one is admitted by the conditions of the moment it would reach the device.
+     * [admit] refuses by throwing; the connection is kept.
+     */
+    public suspend fun <T> withApp(
+        appName: String,
+        minVersion: String,
+        admit: () -> Unit,
+        block: suspend (LedgerTransport) -> T,
     ): T = mutex.withLock {
+        admit()
+        val transport = TrackedTransport(guarded { ensureApp(appName, minVersion) })
         try {
-            block(ensureApp(appName, minVersion))
+            block(transport)
         } catch (error: Throwable) {
-            if (!error.isDeviceAnswer()) dropTransport()
+            // Only an answer cut short desyncs the channel; a failure between whole answers keeps it.
+            if (!transport.inSync) dropTransport()
             throw error
+        }
+    }
+
+    /**
+     * Name of the open app, asked without a prompt and without switching apps. Null while no connection is
+     * held (a background check never opens one) or the device declines to answer, e.g. while locked;
+     * throws when the connection is lost. [admit] works as in [withApp].
+     */
+    public suspend fun openAppName(admit: () -> Unit): String? = mutex.withLock {
+        admit()
+        guarded {
+            val current = transport.load() ?: return@guarded null
+            try {
+                current.getAppAndVersion().name
+            } catch (error: LedgerException) {
+                if (error.isDeviceAnswer()) null else throw error
+            }
         }
     }
 
     public fun close() {
         dropTransport()
+    }
+
+    private suspend fun <T> guarded(operation: suspend () -> T): T = try {
+        operation()
+    } catch (error: Throwable) {
+        if (!error.isDeviceAnswer()) dropTransport()
+        throw error
     }
 
     // Returns the handle the app was checked on: a replacement opened later was never queried.
@@ -58,13 +98,21 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
         return app.transport
     }
 
+    // A held handle outlives an unplug noticed by no one; the idempotent first query tells, and a fresh one replaces it.
     private suspend fun currentApp(): CheckedApp {
-        val current = connectedTransport()
-        return CheckedApp(current, current.getAppAndVersion())
+        transport.load()?.let { held ->
+            try {
+                return CheckedApp(held, held.getAppAndVersion())
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                if (error.isDeviceAnswer()) throw error
+                dropTransport()
+            }
+        }
+        val opened = transportProvider.open().also(transport::store)
+        return CheckedApp(opened, opened.getAppAndVersion())
     }
-
-    private suspend fun connectedTransport(): LedgerTransport =
-        transport.load() ?: transportProvider.open().also(transport::store)
 
     // The device re-enumerates on USB after an app switch, so the old handle is dead.
     private suspend fun switchApp(current: LedgerTransport, command: Apdu): CheckedApp {
@@ -95,6 +143,20 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
     }
 
     private class CheckedApp(val transport: LedgerTransport, val info: LedgerAppInfo)
+
+    /** Counts exchanges that have not returned a whole answer: in flight on another thread, or failed. */
+    private class TrackedTransport(private val inner: LedgerTransport) : LedgerTransport {
+        private val unsettled = AtomicInt(0)
+
+        val inSync: Boolean get() = unsettled.load() == 0
+
+        override suspend fun exchange(apdu: ByteArray): ByteArray {
+            unsettled.addAndFetch(1)
+            return inner.exchange(apdu).also { unsettled.addAndFetch(-1) }
+        }
+
+        override fun close() = inner.close()
+    }
 
     private companion object {
         const val RECONNECT_ATTEMPTS = 20
