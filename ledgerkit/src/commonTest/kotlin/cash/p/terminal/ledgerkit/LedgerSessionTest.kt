@@ -293,6 +293,60 @@ class LedgerSessionTest {
     }
 
     @Test
+    fun withOpenApp_otherAppOpen_throwsWrongAppOpenWithoutSwitching() = runTest {
+        val ledger = FakeLedger(currentApp = "Ethereum")
+        var blockRan = false
+
+        assertFailsWith<LedgerException.WrongAppOpen> {
+            LedgerSession(ledger.provider).withOpenApp("Bitcoin", "2.0.0", admit = {}) { blockRan = true }
+        }
+
+        assertEquals(listOf("GET"), ledger.commands)
+        assertFalse(blockRan)
+        assertFalse(ledger.transports.single().closed)
+    }
+
+    @Test
+    fun withOpenApp_onDashboard_throwsWrongAppOpenWithoutOpeningApp() = runTest {
+        val ledger = FakeLedger()
+
+        assertFailsWith<LedgerException.WrongAppOpen> {
+            LedgerSession(ledger.provider).withOpenApp("Bitcoin", "2.0.0", admit = {}) { it.send(appCommand) }
+        }
+
+        assertEquals(listOf("GET"), ledger.commands)
+        assertEquals("BOLOS", ledger.currentApp)
+    }
+
+    @Test
+    fun withOpenApp_appOpen_runsBlock() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+
+        LedgerSession(ledger.provider).withOpenApp("Bitcoin", "2.0.0", admit = {}) { it.send(appCommand) }
+
+        assertEquals(listOf("GET", "APP"), ledger.commands)
+        assertEquals(1, ledger.transports.size)
+    }
+
+    @Test
+    fun withOpenApp_heldHandleStoppedAnsweringAndOtherAppOpen_reopensThenThrowsWrongAppOpen() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        ledger.transports.single().silent = true
+        ledger.currentApp = "Ethereum"
+
+        assertFailsWith<LedgerException.WrongAppOpen> {
+            session.withOpenApp("Bitcoin", "2.0.0", admit = {}) { it.send(appCommand) }
+        }
+
+        assertEquals(listOf("GET", "APP", "GET"), ledger.commands)
+        assertEquals(2, ledger.transports.size)
+        assertTrue(ledger.transports[0].closed)
+        assertFalse(ledger.transports[1].closed)
+    }
+
+    @Test
     fun openAppName_otherAppOpenedAfterOperation_answersOverKeptConnectionWithoutSwitching() = runTest {
         val ledger = FakeLedger(currentApp = "Bitcoin")
         val session = LedgerSession(ledger.provider)

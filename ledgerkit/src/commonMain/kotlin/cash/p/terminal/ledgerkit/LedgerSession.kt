@@ -46,9 +46,25 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
         minVersion: String,
         admit: () -> Unit,
         block: suspend (LedgerTransport) -> T,
+    ): T = withApp(appName, minVersion, allowSwitch = true, admit, block)
+
+    /** [withApp] that never switches apps: throws [LedgerException.WrongAppOpen] unless [appName] is already open. */
+    public suspend fun <T> withOpenApp(
+        appName: String,
+        minVersion: String,
+        admit: () -> Unit,
+        block: suspend (LedgerTransport) -> T,
+    ): T = withApp(appName, minVersion, allowSwitch = false, admit, block)
+
+    private suspend fun <T> withApp(
+        appName: String,
+        minVersion: String,
+        allowSwitch: Boolean,
+        admit: () -> Unit,
+        block: suspend (LedgerTransport) -> T,
     ): T = mutex.withLock {
         admit()
-        val transport = TrackedTransport(guarded { ensureApp(appName, minVersion) })
+        val transport = TrackedTransport(guarded { ensureApp(appName, minVersion, allowSwitch) })
         try {
             block(transport)
         } catch (error: Throwable) {
@@ -97,9 +113,13 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
     }
 
     // Returns the handle the app was checked on: a replacement opened later was never queried.
-    private suspend fun ensureApp(appName: String, minVersion: String): LedgerTransport {
+    private suspend fun ensureApp(appName: String, minVersion: String, allowSwitch: Boolean): LedgerTransport {
         var app = currentApp()
         if (app.info.name != appName) {
+            if (!allowSwitch) {
+                logger.d { "$appName not open (${app.info.name}); not switching" }
+                throw LedgerException.WrongAppOpen()
+            }
             logger.i { "Switching app ${app.info.name} -> $appName" }
             if (!app.info.isDashboard) app = switchApp(app.transport, DashboardCommands.quitApp)
             app = switchApp(app.transport, DashboardCommands.openApp(appName))
