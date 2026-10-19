@@ -4,6 +4,7 @@ public sealed class LedgerException(message: String, cause: Throwable? = null) :
     public class UserRejected : LedgerException("Rejected on the device")
     public class AppNotInstalled : LedgerException("App is not installed on the device")
     public class DeviceLocked : LedgerException("Device is locked")
+    public class DeviceNotOnboarded : LedgerException("Device is not set up yet")
     public class WrongAppOpen : LedgerException("Another app is open on the device")
     public class DataTooLarge : LedgerException("Data is too large for the device")
 
@@ -38,6 +39,7 @@ public sealed class LedgerException(message: String, cause: Throwable? = null) :
             StatusWord.DEVICE_LOCKED, StatusWord.SECURITY_STATUS_NOT_SATISFIED -> DeviceLocked()
             StatusWord.CLA_NOT_SUPPORTED, StatusWord.INS_NOT_SUPPORTED, StatusWord.APP_NOT_OPEN -> WrongAppOpen()
             StatusWord.DATA_TOO_LARGE -> DataTooLarge()
+            in StatusWord.DEVICE_NOT_ONBOARDED -> DeviceNotOnboarded()
             else -> Unknown(statusWord)
         }
     }

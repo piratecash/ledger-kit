@@ -81,6 +81,9 @@ class ApduTest {
             0x6D00 to LedgerException.WrongAppOpen::class,
             0x6511 to LedgerException.WrongAppOpen::class,
             0x6A84 to LedgerException.DataTooLarge::class,
+            0x6D06 to LedgerException.DeviceNotOnboarded::class,
+            0x6D07 to LedgerException.DeviceNotOnboarded::class,
+            0x6611 to LedgerException.DeviceNotOnboarded::class,
         )
 
         expected.forEach { (statusWord, type) ->

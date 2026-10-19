@@ -15,4 +15,7 @@ public object StatusWord {
     /** What the dashboard answers to an app command. */
     public const val APP_NOT_OPEN: Int = 0x6511
     public const val DATA_TOO_LARGE: Int = 0x6A84
+
+    /** What a device answers before it is set up with a PIN and a seed. */
+    public val DEVICE_NOT_ONBOARDED: Set<Int> = setOf(0x6D06, 0x6D07, 0x6611)
 }
