@@ -30,7 +30,7 @@ class FakeLedger(
         Transport(silent = transports.isNotEmpty() && silentReopens).also(transports::add)
     }
 
-    inner class Transport(private val silent: Boolean) : LedgerTransport {
+    inner class Transport(var silent: Boolean) : LedgerTransport {
         var closeCalls = 0
         var beforeClose: () -> Unit = {}
         val closed: Boolean get() = closeCalls > 0

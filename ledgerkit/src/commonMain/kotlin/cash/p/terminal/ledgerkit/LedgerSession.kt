@@ -67,7 +67,7 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
         guarded {
             val current = transport.load() ?: return@guarded null
             try {
-                current.getAppAndVersion().name
+                queryHeld(current)?.name
             } catch (error: LedgerException) {
                 if (error.isDeviceAnswer()) null else throw error
             }
@@ -103,7 +103,7 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
     private suspend fun currentApp(): CheckedApp {
         transport.load()?.let { held ->
             try {
-                return CheckedApp(held, held.getAppAndVersion())
+                queryHeld(held)?.let { return CheckedApp(held, it) }
             } catch (error: CancellationException) {
                 throw error
             } catch (error: Exception) {
@@ -113,6 +113,13 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
         }
         val opened = transportProvider.open().also(transport::store)
         return CheckedApp(opened, opened.getAppAndVersion())
+    }
+
+    // A held handle can stop answering while the device stays enumerated; one that does not answer in time is dropped.
+    private suspend fun queryHeld(held: LedgerTransport): LedgerAppInfo? {
+        val info = withTimeoutOrNull(HELD_QUERY_TIMEOUT) { held.getAppAndVersion() }
+        if (info == null) dropTransport()
+        return info
     }
 
     // The device re-enumerates on USB after an app switch, so the old handle is dead.
@@ -165,6 +172,7 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
         const val RECONNECT_ATTEMPTS = 20
         val RECONNECT_DELAY = 500.milliseconds
         val RECONNECT_ATTEMPT_TIMEOUT = 5.seconds
+        val HELD_QUERY_TIMEOUT = 3.seconds
     }
 }
 
