@@ -4,6 +4,7 @@ agp = "8.12.1"
 coroutines = "1.10.2"
 hid4java = "0.8.0"
 jna = "5.17.0"
+kermit = "2.1.0"
 kotlinx-serialization = "1.10.0"
 
 [libraries]
@@ -12,6 +13,7 @@ kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-t
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinx-serialization" }
 hid4java = { module = "org.hid4java:hid4java", version.ref = "hid4java" }
 jna = { module = "net.java.dev.jna:jna", version.ref = "jna" }
+kermit = { module = "co.touchlab:kermit", version.ref = "kermit" }
 
 [plugins]
 android-library = { id = "com.android.library", version.ref = "agp" }

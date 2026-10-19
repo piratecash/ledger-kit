@@ -6,6 +6,7 @@ import cash.p.terminal.ledgerkit.apdu.LedgerException
 import cash.p.terminal.ledgerkit.apdu.send
 import cash.p.terminal.ledgerkit.transport.LedgerTransport
 import cash.p.terminal.ledgerkit.transport.LedgerTransportProvider
+import co.touchlab.kermit.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
@@ -52,7 +53,12 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
             block(transport)
         } catch (error: Throwable) {
             // Only an answer cut short desyncs the channel; a failure between whole answers keeps it.
-            if (!transport.inSync) dropTransport()
+            if (!transport.inSync) {
+                if (error !is CancellationException) {
+                    logger.w(error) { "Exchange cut short in withApp($appName); dropping the connection" }
+                }
+                dropTransport()
+            }
             throw error
         }
     }
@@ -81,7 +87,12 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
     private suspend fun <T> guarded(operation: suspend () -> T): T = try {
         operation()
     } catch (error: Throwable) {
-        if (!error.isDeviceAnswer()) dropTransport()
+        if (!error.isDeviceAnswer()) {
+            if (error !is CancellationException) {
+                logger.w(error) { "Transport error; dropping the connection" }
+            }
+            dropTransport()
+        }
         throw error
     }
 
@@ -89,11 +100,16 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
     private suspend fun ensureApp(appName: String, minVersion: String): LedgerTransport {
         var app = currentApp()
         if (app.info.name != appName) {
+            logger.i { "Switching app ${app.info.name} -> $appName" }
             if (!app.info.isDashboard) app = switchApp(app.transport, DashboardCommands.quitApp)
             app = switchApp(app.transport, DashboardCommands.openApp(appName))
-            if (app.info.name != appName) throw LedgerException.WrongAppOpen()
+            if (app.info.name != appName) {
+                logger.w { "Expected $appName after switching, found ${app.info.name}" }
+                throw LedgerException.WrongAppOpen()
+            }
         }
         if (!isVersionAtLeast(app.info.version, minVersion)) {
+            logger.w { "$appName ${app.info.version} is older than the required $minVersion" }
             throw LedgerException.AppVersionTooOld(appName, app.info.version, minVersion)
         }
         return app.transport
@@ -108,17 +124,23 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
                 throw error
             } catch (error: Exception) {
                 if (error.isDeviceAnswer()) throw error
+                logger.w(error) { "Held connection failed; dropping it" }
                 dropTransport()
             }
         }
         val opened = transportProvider.open().also(transport::store)
-        return CheckedApp(opened, opened.getAppAndVersion())
+        return CheckedApp(opened, opened.getAppAndVersion()).also {
+            logger.i { "Opened a connection; app ${it.info.name} ${it.info.version}" }
+        }
     }
 
     // A held handle can stop answering while the device stays enumerated; one that does not answer in time is dropped.
     private suspend fun queryHeld(held: LedgerTransport): LedgerAppInfo? {
         val info = withTimeoutOrNull(HELD_QUERY_TIMEOUT) { held.getAppAndVersion() }
-        if (info == null) dropTransport()
+        if (info == null) {
+            logger.w { "Held connection gave no answer within $HELD_QUERY_TIMEOUT; dropping it" }
+            dropTransport()
+        }
         return info
     }
 
@@ -139,10 +161,12 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
                 throw error
             } catch (error: Exception) {
                 if (error.isDeviceAnswer()) throw error
+                logger.d(error) { "Reconnect attempt failed" }
                 lastError = error
             }
             dropTransport()
         }
+        logger.w(lastError) { "Giving up reconnecting after $RECONNECT_ATTEMPTS attempts" }
         throw LedgerException.TransportClosed(lastError)
     }
 
@@ -169,6 +193,7 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
     }
 
     private companion object {
+        val logger = Logger.withTag("LedgerSession")
         const val RECONNECT_ATTEMPTS = 20
         val RECONNECT_DELAY = 500.milliseconds
         val RECONNECT_ATTEMPT_TIMEOUT = 5.seconds
