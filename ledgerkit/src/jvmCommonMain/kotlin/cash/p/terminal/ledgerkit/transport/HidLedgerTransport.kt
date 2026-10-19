@@ -3,6 +3,7 @@ package cash.p.terminal.ledgerkit.transport
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import kotlin.random.Random
 
 /** A platform HID handle that moves whole reports. */
 internal interface HidPacketPipe {
@@ -15,10 +16,13 @@ internal interface HidPacketPipe {
 }
 
 internal class HidLedgerTransport(private val pipe: HidPacketPipe) : LedgerTransport {
+    // Per connection, so a late answer meant for a dropped connection cannot pass for ours.
+    private val channel = Random.nextInt(1, 0xFFFF)
+
     // Reads poll in short slices: a user confirmation can take minutes and cancellation must still get through.
     override suspend fun exchange(apdu: ByteArray): ByteArray = withContext(Dispatchers.IO) {
-        LedgerHidFraming.encode(apdu).forEach(pipe::write)
-        val decoder = LedgerHidFraming.ResponseDecoder()
+        LedgerHidFraming.encode(apdu, channel).forEach(pipe::write)
+        val decoder = LedgerHidFraming.ResponseDecoder(channel)
         var response: ByteArray? = null
         while (response == null) {
             ensureActive()
