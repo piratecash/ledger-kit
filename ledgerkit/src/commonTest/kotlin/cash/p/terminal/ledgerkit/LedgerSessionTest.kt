@@ -7,7 +7,9 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
@@ -15,9 +17,14 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.AbstractLongTimeSource
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.DurationUnit
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LedgerSessionTest {
@@ -412,5 +419,196 @@ class LedgerSessionTest {
 
         session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
         assertEquals(2, ledger.transports.size)
+    }
+
+    @Test
+    fun connectionId_firstOperation_changesFromInitial() = runTest {
+        val session = LedgerSession(FakeLedger(currentApp = "Bitcoin").provider)
+        val initial = session.connectionId
+
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+
+        assertNotEquals(initial, session.connectionId)
+    }
+
+    @Test
+    fun connectionId_appSwitchQuitThenOpen_keepsId() = runTest {
+        val ledger = FakeLedger(currentApp = "Ethereum")
+        val session = LedgerSession(ledger.provider, testScheduler.timeSource)
+        session.withApp("Ethereum", "1.0.0") { it.send(appCommand) }
+        val connected = session.connectionId
+
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+
+        assertEquals(listOf("GET", "APP", "GET", "QUIT", "GET", "OPEN Bitcoin", "GET", "APP"), ledger.commands)
+        assertEquals(connected, session.connectionId)
+    }
+
+    @Test
+    fun connectionId_reconnectReopensAfterFailuresWithinWindow_keepsId() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider, testScheduler.timeSource)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        val connected = session.connectionId
+        ledger.failingReopens = 3
+
+        session.withApp("Ethereum", "1.0.0") { it.send(appCommand) }
+
+        assertEquals(connected, session.connectionId)
+    }
+
+    @Test
+    fun connectionId_reconnectReopensLaterThanWindow_changesId() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider, testScheduler.timeSource)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        val connected = session.connectionId
+        ledger.failingReopens = 10
+
+        session.withApp("Ethereum", "1.0.0") { it.send(appCommand) }
+
+        assertNotEquals(connected, session.connectionId)
+    }
+
+    @Test
+    fun connectionId_oldHandleCloseOutlastsWindow_changesId() = runTest {
+        var closeTime = Duration.ZERO
+        // The scheduler's clock cannot move inside a non-suspending close, so close time is added by hand.
+        val timeSource = object : AbstractLongTimeSource(DurationUnit.MILLISECONDS) {
+            override fun read() = testScheduler.currentTime + closeTime.inWholeMilliseconds
+        }
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider, timeSource)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        val connected = session.connectionId
+        ledger.transports.single().beforeClose = { closeTime += 5.seconds }
+
+        session.withApp("Ethereum", "1.0.0") { it.send(appCommand) }
+
+        assertNotEquals(connected, session.connectionId)
+    }
+
+    @Test
+    fun connectionId_heldHandleDiedSinceLastOperation_changesId() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider, testScheduler.timeSource)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        val connected = session.connectionId
+        ledger.transports.single().close()
+
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+
+        assertNotEquals(connected, session.connectionId)
+    }
+
+    @Test
+    fun connectionId_reconnectCancelledAfterSwitchAnswer_nextOperationChangesId() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider, testScheduler.timeSource)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        val connected = session.connectionId
+        ledger.failingReopens = Int.MAX_VALUE
+        val job = launch { session.withApp("Ethereum", "1.0.0") { it.send(appCommand) } }
+        advanceTimeBy(1.seconds)
+        job.cancel()
+        job.join()
+        ledger.failingReopens = 0
+
+        session.withApp("Ethereum", "1.0.0") { it.send(appCommand) }
+
+        assertNotEquals(connected, session.connectionId)
+    }
+
+    @Test
+    fun connectionId_deviceLockedInOperation_changesId() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        val connected = session.connectionId
+
+        assertFailsWith<LedgerException.DeviceLocked> {
+            session.withApp("Bitcoin", "2.0.0") { throw LedgerException.DeviceLocked() }
+        }
+
+        assertNotEquals(connected, session.connectionId)
+    }
+
+    @Test
+    fun connectionId_deviceLockedOnAppCheck_changesId() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        val connected = session.connectionId
+        ledger.locked = true
+
+        assertFailsWith<LedgerException.DeviceLocked> {
+            session.withOpenApp("Bitcoin", "2.0.0", admit = {}) { it.send(appCommand) }
+        }
+
+        assertEquals(1, ledger.transports.size)
+        assertNotEquals(connected, session.connectionId)
+    }
+
+    @Test
+    fun connectionId_deviceLockedOnOpenAppName_changesId() = runTest {
+        val ledger = FakeLedger(currentApp = "Bitcoin")
+        val session = LedgerSession(ledger.provider)
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+        val connected = session.connectionId
+        ledger.locked = true
+
+        assertNull(session.openAppName(admit = {}))
+        assertNotEquals(connected, session.connectionId)
+    }
+
+    @Test
+    fun openingApp_appSwitchQuitThenOpen_isAppNameOnlyWhileOpenInFlight() = runTest {
+        val ledger = FakeLedger(currentApp = "Ethereum")
+        val session = LedgerSession(ledger.provider)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            session.openingApp.collect { ledger.commands += "openingApp=$it" }
+        }
+
+        session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) }
+
+        assertEquals(
+            listOf(
+                "openingApp=null", "GET", "QUIT", "GET",
+                "openingApp=Bitcoin", "OPEN Bitcoin", "openingApp=null", "GET", "APP",
+            ),
+            ledger.commands,
+        )
+    }
+
+    @Test
+    fun openingApp_appNotInstalled_clearsAfterAnswer() = runTest {
+        val ledger = FakeLedger()
+        val session = LedgerSession(ledger.provider)
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            session.openingApp.collect { ledger.commands += "openingApp=$it" }
+        }
+
+        assertFailsWith<LedgerException.AppNotInstalled> {
+            session.withApp("Monero", "2.0.0") { it.send(appCommand) }
+        }
+
+        assertEquals(
+            listOf("openingApp=null", "GET", "openingApp=Monero", "OPEN Monero", "openingApp=null"),
+            ledger.commands,
+        )
+    }
+
+    @Test
+    fun openingApp_cancelledWhileDeviceAsks_clears() = runTest {
+        val ledger = FakeLedger().apply { answersOpenApp = false }
+        val session = LedgerSession(ledger.provider)
+        val job = launch { session.withApp("Bitcoin", "2.0.0") { it.send(appCommand) } }
+        advanceUntilIdle()
+        assertEquals("Bitcoin", session.openingApp.value)
+
+        job.cancel()
+        job.join()
+
+        assertNull(session.openingApp.value)
     }
 }

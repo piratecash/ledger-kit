@@ -20,6 +20,7 @@ class FakeLedger(
     var locked = false
     var unplugged = false
     var answersAppCommands = true
+    var answersOpenApp = true
     var truncatesAppAnswers = false
 
     val provider = LedgerTransportProvider {
@@ -64,9 +65,11 @@ class FakeLedger(
                 .also { afterAppInfo() }
         }
 
-        private fun openApp(name: String): ByteArray =
-            if (name in installedApps) switchTo("OPEN $name", name)
+        private suspend fun openApp(name: String): ByteArray {
+            if (!answersOpenApp) awaitCancellation()
+            return if (name in installedApps) switchTo("OPEN $name", name)
             else statusWord(StatusWord.APP_NOT_INSTALLED).also { commands += "OPEN $name" }
+        }
 
         private fun switchTo(command: String, app: String): ByteArray {
             commands += command

@@ -9,22 +9,45 @@ import cash.p.terminal.ledgerkit.transport.LedgerTransportProvider
 import co.touchlab.kermit.Logger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.concurrent.atomics.AtomicInt
+import kotlin.concurrent.atomics.AtomicLong
 import kotlin.concurrent.atomics.AtomicReference
 import kotlin.concurrent.atomics.ExperimentalAtomicApi
+import kotlin.time.ComparableTimeMark
 import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
+import kotlin.time.TimeSource
 
 /** One Ledger device: serializes operations and switches the open app when an operation needs another one. */
 @OptIn(ExperimentalAtomicApi::class)
-public class LedgerSession(private val transportProvider: LedgerTransportProvider) {
+public class LedgerSession internal constructor(
+    private val transportProvider: LedgerTransportProvider,
+    private val timeSource: TimeSource.WithComparableMarks,
+) {
+    // A defaulted second parameter would break trailing-lambda construction: `LedgerSession { open() }`.
+    public constructor(transportProvider: LedgerTransportProvider) : this(transportProvider, TimeSource.Monotonic)
+
     private val mutex = Mutex()
+    private val connections = AtomicLong(0)
+    private val mutableOpeningApp = MutableStateFlow<String?>(null)
+
+    /** Changes whenever the device behind the session may have changed; unchanged across the session's own app switches. */
+    public val connectionId: Long get() = connections.load()
+
+    /** The app the device is asking to open ("Open X?"), null while no such request is in flight. */
+    public val openingApp: StateFlow<String?> = mutableOpeningApp.asStateFlow()
 
     // close() runs outside the mutex; taking the handle atomically closes each one exactly once.
     private val transport = AtomicReference<LedgerTransport?>(null)
+
+    // Set while the session reconnects after its own app switch; read and written under the mutex.
+    private var ownSwitchAnswer: ComparableTimeMark? = null
 
     /**
      * Runs [block] with [appName] open in at least [minVersion]. Every exchange of [block] belongs to
@@ -64,18 +87,20 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
         block: suspend (LedgerTransport) -> T,
     ): T = mutex.withLock {
         admit()
-        val transport = TrackedTransport(guarded { ensureApp(appName, minVersion, allowSwitch) })
-        try {
-            block(transport)
-        } catch (error: Throwable) {
-            // Only an answer cut short desyncs the channel; a failure between whole answers keeps it.
-            if (!transport.inSync) {
-                if (error !is CancellationException) {
-                    logger.w(error) { "Exchange cut short in withApp($appName); dropping the connection" }
+        noticingLock {
+            val transport = TrackedTransport(guarded { ensureApp(appName, minVersion, allowSwitch) })
+            try {
+                block(transport)
+            } catch (error: Throwable) {
+                // Only an answer cut short desyncs the channel; a failure between whole answers keeps it.
+                if (!transport.inSync) {
+                    if (error !is CancellationException) {
+                        logger.w(error) { "Exchange cut short in withApp($appName); dropping the connection" }
+                    }
+                    dropTransport()
                 }
-                dropTransport()
+                throw error
             }
-            throw error
         }
     }
 
@@ -89,7 +114,7 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
         guarded {
             val current = transport.load() ?: return@guarded null
             try {
-                queryHeld(current)?.name
+                noticingLock { queryHeld(current) }?.name
             } catch (error: LedgerException) {
                 if (error.isDeviceAnswer()) null else throw error
             }
@@ -98,6 +123,14 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
 
     public fun close() {
         dropTransport()
+    }
+
+    // A locked device cannot be told apart from another one plugged in meanwhile.
+    private inline fun <T> noticingLock(operation: () -> T): T = try {
+        operation()
+    } catch (error: LedgerException.DeviceLocked) {
+        connections.addAndFetch(1)
+        throw error
     }
 
     private suspend fun <T> guarded(operation: suspend () -> T): T = try {
@@ -122,7 +155,7 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
             }
             logger.i { "Switching app ${app.info.name} -> $appName" }
             if (!app.info.isDashboard) app = switchApp(app.transport, DashboardCommands.quitApp)
-            app = switchApp(app.transport, DashboardCommands.openApp(appName))
+            app = switchApp(app.transport, DashboardCommands.openApp(appName), openingApp = appName)
             if (app.info.name != appName) {
                 logger.w { "Expected $appName after switching, found ${app.info.name}" }
                 throw LedgerException.WrongAppOpen()
@@ -149,6 +182,7 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
             }
         }
         val opened = transportProvider.open().also(transport::store)
+        if (!isOwnReconnect()) connections.addAndFetch(1)
         return CheckedApp(opened, opened.getAppAndVersion()).also {
             logger.i { "Opened a connection; app ${it.info.name} ${it.info.version}" }
         }
@@ -165,11 +199,27 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
     }
 
     // The device re-enumerates on USB after an app switch, so the old handle is dead.
-    private suspend fun switchApp(current: LedgerTransport, command: Apdu): CheckedApp {
-        current.send(command)
+    private suspend fun switchApp(current: LedgerTransport, command: Apdu, openingApp: String? = null): CheckedApp {
+        mutableOpeningApp.value = openingApp
+        try {
+            current.send(command)
+        } finally {
+            mutableOpeningApp.value = null
+        }
+        // Taken before the close, which may block for an unbounded time on the platform.
+        val answered = timeSource.markNow()
         dropTransport()
-        return reconnect()
+        ownSwitchAnswer = answered
+        try {
+            return reconnect()
+        } finally {
+            ownSwitchAnswer = null
+        }
     }
+
+    // A device back later than the window may be another one plugged in meanwhile.
+    private fun isOwnReconnect(): Boolean =
+        ownSwitchAnswer?.let { it.elapsedNow() <= OWN_RECONNECT_WINDOW } == true
 
     private suspend fun reconnect(): CheckedApp {
         var lastError: Throwable? = null
@@ -218,6 +268,7 @@ public class LedgerSession(private val transportProvider: LedgerTransportProvide
         val RECONNECT_DELAY = 500.milliseconds
         val RECONNECT_ATTEMPT_TIMEOUT = 5.seconds
         val HELD_QUERY_TIMEOUT = 3.seconds
+        val OWN_RECONNECT_WINDOW = 5.seconds
     }
 }
 
