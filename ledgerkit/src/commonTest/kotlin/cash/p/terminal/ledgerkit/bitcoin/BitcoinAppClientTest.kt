@@ -181,9 +181,77 @@ class BitcoinAppClientTest {
         }
     }
 
+    // Command data from app-bitcoin-new bitcoin_client/ledger_bitcoin/command_builder.py sign_message.
+    @Test
+    fun signMessage_upstreamVectors_sendsUpstreamCommandDataAndReturnsSignature() = runTest {
+        listOf(
+            Triple("Hello world!".encodeToByteArray(), "m/84'/0'/0'/0/0", "0580000054800000008000000000000000000000000c2acd317749689ae4471477dfc8cdb047fa0ad8a9df64f57fb81606f16df3677d"),
+            Triple("a".repeat(64).encodeToByteArray(), "m/44'/0'/0'/0/0", "058000002c800000008000000000000000000000004088df0645999a1bc9dec19086e862403750a069436d7ecf7775256f78279b3fcb"),
+            Triple("b".repeat(65).encodeToByteArray(), "m/49'/0'/0'/1/7", "0580000031800000008000000000000001000000074127cdbfcc80d6dfb8f32db268a943049c0ddab2183bf9ffb4e1faceee9b955d17"),
+            Triple(ByteArray(256) { it.toByte() } + "xyz".encodeToByteArray(), "m/84'/0'/0'/0/0", "058000005480000000800000000000000000000000fd0301be12277c8b3b676d85694fe5129986a89cbfe5bb6ca23649a1993cadb8291874"),
+        ).forEach { (message, path, data) ->
+            val transport = RecordingTransport { MESSAGE_SIGNATURE.hexToByteArray() + OK }
+
+            val signature = BitcoinAppClient(transport).signMessage(DerivationPath.parse(path), message)
+
+            assertEquals(MESSAGE_SIGNATURE, signature.toHexString())
+            val apdu = transport.sent.single()
+            assertEquals("e1100001", apdu.copyOfRange(0, 4).toHexString(), path)
+            assertEquals(data, apdu.copyOfRange(5, apdu.size).toHexString(), "${message.size} bytes")
+        }
+    }
+
+    @Test
+    fun signMessage_appAsksForSecondChunk_answersLeafAndProofThroughContinue() = runTest {
+        val first = "c".repeat(64).encodeToByteArray()
+        val second = "d".encodeToByteArray()
+        val firstLeaf = sha256(byteArrayOf(0) + first)
+        val secondLeaf = sha256(byteArrayOf(0) + second)
+        val root = sha256(byteArrayOf(1) + firstLeaf + secondLeaf)
+        val transport = RecordingTransport { apdu ->
+            if (apdu[0] == 0xE1.toByte()) byteArrayOf(0x41) + root + byteArrayOf(2, 1) + INTERRUPTED
+            else MESSAGE_SIGNATURE.hexToByteArray() + OK
+        }
+
+        BitcoinAppClient(transport).signMessage(DerivationPath.parse("m/84'/0'/0'/0/0"), first + second)
+
+        assertContentEquals("f8010001".hexToByteArray() + 66.toByte() + secondLeaf + byteArrayOf(1, 1) + firstLeaf, transport.sent[1])
+    }
+
+    @Test
+    fun signMessage_answerOf64Bytes_throwsMalformedResponse() = runTest {
+        val transport = RecordingTransport { MESSAGE_SIGNATURE.hexToByteArray().copyOfRange(0, 64) + OK }
+
+        assertFailsWith<LedgerException.MalformedResponse> {
+            BitcoinAppClient(transport).signMessage(DerivationPath.parse("m/84'/0'/0'/0/0"), "hi".encodeToByteArray())
+        }
+    }
+
+    @Test
+    fun signMessage_headerOutsideCompressedKeyRange_throwsMalformedResponse() = runTest {
+        listOf("1b", "21").forEach { header ->
+            val transport = RecordingTransport { (header + MESSAGE_SIGNATURE.drop(2)).hexToByteArray() + OK }
+
+            assertFailsWith<LedgerException.MalformedResponse>(header) {
+                BitcoinAppClient(transport).signMessage(DerivationPath.parse("m/84'/0'/0'/0/0"), "hi".encodeToByteArray())
+            }
+        }
+    }
+
+    @Test
+    fun signMessage_emptyMessage_throwsWithoutExchange() = runTest {
+        val transport = RecordingTransport { OK }
+
+        assertFailsWith<IllegalArgumentException> {
+            BitcoinAppClient(transport).signMessage(DerivationPath.parse("m/84'/0'/0'/0/0"), ByteArray(0))
+        }
+        assertEquals(0, transport.sent.size)
+    }
+
     private companion object {
         val OK = "9000".hexToByteArray()
         val INTERRUPTED = "e000".hexToByteArray()
+        val MESSAGE_SIGNATURE = "20" + "11".repeat(32) + "22".repeat(32)
         const val VALID_DER =
             "3045022100ab44f34dd7e87c9054591297a101e8500a0641d1d591878d0d23cf8096fa79e802205d12d1062d925e27b57bdcf994ecf332ad0a8e67b8fe407bab2101255da632aa"
     }

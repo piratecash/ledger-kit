@@ -56,6 +56,16 @@ public class BitcoinAppClient(private val transport: LedgerTransport) {
         return interpreter.yielded.map { parseSignature(it, psbt.inputs.size) }
     }
 
+    /** A BIP-137 signature of [message] by the key at [path]: header (31 or 32) || r || s. The user reviews it on the device. */
+    public suspend fun signMessage(path: DerivationPath, message: ByteArray): ByteArray {
+        val interpreter = ClientCommandInterpreter()
+        val chunks = message.asList().chunked(MESSAGE_CHUNK_SIZE).map { it.toByteArray() }
+        val data = path.toApduBytes() + compactSize(message.size) + interpreter.addKnownList(chunks)
+        return request(SIGN_MESSAGE, data, interpreter).also {
+            if (!isCompressedKeyMessageSignature(it)) throw LedgerException.MalformedResponse("message signature")
+        }
+    }
+
     private suspend fun request(
         ins: Int,
         data: ByteArray,
@@ -111,6 +121,10 @@ public class BitcoinAppClient(private val transport: LedgerTransport) {
                 (signature.size == SCHNORR_SIGNATURE_SIZE + 1 && signature.last().toInt() == SIGHASH_ALL)
         }
 
+    // The app always signs with a compressed key: header = 27 + 4 + recovery parity (sign_message.c).
+    private fun isCompressedKeyMessageSignature(signature: ByteArray): Boolean =
+        signature.size == MESSAGE_SIGNATURE_SIZE && (signature[0].toInt() and 0xFF) in COMPRESSED_KEY_HEADERS
+
     private fun Boolean.toByte(): Byte = if (this) 1 else 0
 
     private companion object {
@@ -123,6 +137,11 @@ public class BitcoinAppClient(private val transport: LedgerTransport) {
         const val GET_WALLET_ADDRESS = 0x03
         const val SIGN_PSBT = 0x04
         const val GET_MASTER_FINGERPRINT = 0x05
+        const val SIGN_MESSAGE = 0x10
+
+        const val MESSAGE_CHUNK_SIZE = 64
+        const val MESSAGE_SIGNATURE_SIZE = 65
+        val COMPRESSED_KEY_HEADERS = 31..32
 
         const val SW_INTERRUPTED_EXECUTION = 0xE000
         const val ECDSA_KEY_SIZE = 33

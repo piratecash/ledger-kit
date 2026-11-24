@@ -12,7 +12,8 @@ Kotlin Multiplatform library that talks to Ledger hardware wallets over APDU, fo
 - `LedgerSession` — serializes every exchange of one operation and opens the requested app
   (`GET_APP_AND_VERSION`, `QUIT_APP`, `OPEN_APP`) with a minimum app version
 - `BitcoinAppClient` — the Bitcoin app 2.x (`CLA E1`): master fingerprint, xpubs, addresses of
-  single-signature `pkh`/`sh(wpkh)`/`wpkh`/`tr` wallet policies, PSBTv2 signing with per-input partial signatures
+  single-signature `pkh`/`sh(wpkh)`/`wpkh`/`tr` wallet policies, PSBTv2 signing with per-input partial signatures,
+  BIP-137 message signing (`SIGN_MESSAGE`)
 - `BtchipLegacyClient` — the legacy btchip protocol (`CLA E0`) of the Litecoin, Dogecoin, Dash and Bitcoin Cash
   apps: public keys and addresses, legacy and BIP143 (segwit, `SIGHASH_FORKID`) signing through trusted inputs
 - `EthereumAppClient` — the Ethereum app 1.x (`CLA E0`): public key and address, signing of EIP-155 legacy and

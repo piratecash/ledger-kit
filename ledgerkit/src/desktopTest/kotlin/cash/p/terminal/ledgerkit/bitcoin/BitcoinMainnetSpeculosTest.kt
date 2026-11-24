@@ -56,6 +56,22 @@ class BitcoinMainnetSpeculosTest {
         )
     }
 
+    // No independent signer here: the app recovers the path's key from these signatures (LedgerBtcSignerTest).
+    @Test
+    fun signMessage_helloWorldOnEachScriptPath_returnsRecordedSignature() = runBlocking {
+        val expected = mapOf(
+            "m/44'/0'/0'/0/0" to "20063dcbfd423c3c79671fa2dd083abd03736f98da76dd85d7ae03658717c16f020741b48308d9e062fc6931a61ef9c1a1f4c197c755611dc15e50ff401e48e63e",
+            "m/49'/0'/0'/0/0" to "1fd51d8cbab1555a832a9a346e01422d37d4fda98d18c5918aebcf8d670d06c54f53a3e239079641ab0fd1415354195b477c6ac742c84d591d31fadaa9e9b6b632",
+            "m/84'/0'/0'/0/0" to "1f0bac04efba27daf3b04c19b35f7820aaab911b63f3d489f521dc379a1026dbe86df21553395037c04f42c1445139eefab4dd8da7ab96fab807c15eab6dbc324d",
+        )
+
+        val signatures = expected.keys.associateWith { path ->
+            Speculos.approving { client.signMessage(DerivationPath.parse(path), "Hello world!".encodeToByteArray()) }.toHexString()
+        }
+
+        assertEquals(expected, signatures)
+    }
+
     private fun policy() = WalletPolicy.singleSig(BitcoinAddressType.NATIVE_SEGWIT, FINGERPRINT, ACCOUNT_PATH, ACCOUNT_XPUB)
 
     companion object {
