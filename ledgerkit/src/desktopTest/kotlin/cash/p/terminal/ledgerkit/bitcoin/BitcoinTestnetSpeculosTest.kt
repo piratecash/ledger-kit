@@ -4,14 +4,16 @@ import cash.p.terminal.ledgerkit.DerivationPath
 import cash.p.terminal.ledgerkit.Speculos
 import cash.p.terminal.ledgerkit.ins
 import cash.p.terminal.ledgerkit.transport.LedgerTransport
+import java.util.Base64
 import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 /**
  * The "Bitcoin Test" app on speculos against LedgerHQ/app-bitcoin-new `test_vectors/`
- * (get_extended_pubkey.toml, get_wallet_address.toml, sign_psbt.toml).
+ * (get_extended_pubkey.toml, get_wallet_address.toml, sign_psbt.toml) and `tests/test_sign_message.py`.
  */
 class BitcoinTestnetSpeculosTest {
     private val client get() = BitcoinAppClient(Speculos.transport("Bitcoin Test"))
@@ -92,8 +94,39 @@ class BitcoinTestnetSpeculosTest {
         assertEquals(64, signature.signature.size)
     }
 
+    @Test
+    fun signMessage_upstreamMessages_returnUpstreamSignatures() = runBlocking {
+        listOf(
+            Triple(TIMES, "m/44'/1'/0'/0/0", "IOR4YRVlmJGMx+H7PgQvHzWAF0HAgrUggQeRdnoWKpypfaAberpvF+XbOCM5Cd/ljogNyU3w2OIL8eYCyZ6Ru2k="),
+            Triple("Hello world!", "m/84'/1'/0'/0/0", "IEOK4+JMK7FToR7XMzFCoAYh1nud1IKm9Wq3vXLSVk/lBay8rHCRp9bP6riyR5NDqXYyYf7cXgMQTHNz3SemwZI="),
+            Triple(ROOT_PROBLEM, "m/84'/1'/0'/0/8", "H4frM6TYm5ty1MAf9o/Zz9Qiy3VEldAYFY91SJ/5nYMAZY1UUB97fiRjKW8mJit2+V4OCa1YCqjDqyFnD9Fw75k="),
+            Triple(List(3) { ROOT_PROBLEM }.joinToString(" "), "m/84'/1'/0'/0/8", "IDAl9RThAyunmYuol9DaDs/CScUpiol3FDSjIjyK9y0tc/x1HWrbT/ufdkPFY1Bmi+L9hc3ip1me2RmufprVuNk="),
+        ).forEach { (message, path, expected) ->
+            val signature = Speculos.approving { client.signMessage(DerivationPath.parse(path), message.encodeToByteArray()) }
+
+            assertEquals(expected, Base64.getEncoder().encodeToString(signature), path)
+        }
+    }
+
+    // Bitcoin 2.2.2-2.2.4 failed on a message of exactly one 64-byte chunk; upstream checks only that it signs.
+    @Test
+    fun signMessage_exactlyOneChunk_returnsCompressedKeySignature() = runBlocking {
+        val signature = Speculos.approving {
+            client.signMessage(DerivationPath.parse("m/44'/1'/0'/0/0"), "a".repeat(64).encodeToByteArray())
+        }
+
+        assertEquals(65, signature.size)
+        assertTrue(signature[0].toInt() in 31..32)
+    }
+
     private companion object {
         const val GET_WALLET_ADDRESS = 0x03
         const val POLICY_ID_OFFSET = 6
+        const val TIMES = "The Times 03/Jan/2009 Chancellor on brink of second bailout for banks."
+        const val ROOT_PROBLEM = "The root problem with conventional currency is all the trust that's required to make it work. " +
+            "The central bank must be trusted not to debase the currency, but the history of fiat currencies is full of " +
+            "breaches of that trust. Banks must be trusted to hold our money and transfer it electronically, but they lend " +
+            "it out in waves of credit bubbles with barely a fraction in reserve. We have to trust them with our privacy, " +
+            "trust them not to let identity thieves drain our accounts. Their massive overhead costs make micropayments impossible."
     }
 }
